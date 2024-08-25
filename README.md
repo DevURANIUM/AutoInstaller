@@ -209,9 +209,10 @@ If you encounter any issues or have suggestions for improvement, please reach ou
 
 Support the project through donations:
 
-- **BTC**: `bc1qucxu8r6xza0l38zqsxrq3c6sunx880cm2tj4dr`
-- **TRON**: `TML3NtgE8J6iqR8UFq5JuCthwvbjH6KH7U`
-- **USDT (TRC20)**: `TExYVr8ZPHf9FJcnimD9wnnUTwbBjGZFxk`
+- **BTC**: `bc1qcclcp574hnznm0nmdzzf0ta7366svjskttqks3`
+- **TRON**: `TXJqhhwvkrTdnf5HReZf55hEzZuxjto3R4`
+- **USDT-(TRC20)**: `TXJqhhwvkrTdnf5HReZf55hEzZuxjto3R4`
+- **TON**: `UQAJH2N0pqpvC9YN841w5NH1dCN9Lakwkpjvoy7vXf-vfqgv`
 
 ---
 
