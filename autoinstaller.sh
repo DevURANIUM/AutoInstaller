@@ -691,13 +691,21 @@ while true; do
               # Install ea-php
             if [ $CL_ACTION -eq 4 ]; then
               clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install ea-php?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum install ea-php82 -y ; yum install ea-php81 -y ; yum install ea-php80 -y ; yum install ea-php74 -y ; yum install ea-php73 -y ; yum install ea-php72 -y ; yum install ea-php71 -y ; yum install ea-php70 -y ; yum install ea-php51 -y ; yum install ea-php52 -y ; yum install ea-php53 -y ; yum install ea-php54 -y ; yum install ea-php55 -y ; yum install ea-php56 -y ; yum update cagefs lvemanager
-                  print_b "ea-php Successfully Installed"
+              validate_yn_input "$(print_y 'Are you sure you want to install ea-php? (y/n): ')"
+
+              if [ "$INPUT" = "y" ]; then
+                if grep -qw "ID=cloudlinux" /etc/os-release; then
+                  # List all PHP versions to install
+                  PHP_VERSIONS=("ea-php82" "ea-php81" "ea-php80" "ea-php74" "ea-php73" "ea-php72" "ea-php71" "ea-php70" "ea-php51" "ea-php52" "ea-php53" "ea-php54" "ea-php55" "ea-php56")
+                  # Install each PHP version
+                  for PHP in "${PHP_VERSIONS[@]}"; do
+                    yum install -y "$PHP"
+                  done
+                  # Update cagefs and lvemanager
+                  yum update -y cagefs lvemanager
+                  print_b "ea-php successfully installed."
                 else
-                  print_r "ea-php installation is only supported on CentOS."
+                  print_r "ea-php installation is only supported on CloudLinux."
                 fi
               fi
             fi
