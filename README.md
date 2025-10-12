@@ -202,7 +202,6 @@ To get started, follow these steps:
 
 If you encounter any issues or have suggestions for improvement, please reach out via:
 
-- [Telegram](https://t.me/DevURANIUM)
 - [GitHub Issues](https://github.com/DevURANIUM/AutoInstaller/issues)
 
 ## Donation Links
