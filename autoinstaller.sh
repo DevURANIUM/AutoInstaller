@@ -2,7 +2,7 @@
 #
 
 # Coded by M.A.H
-# ID Telegram : @DevUranium
+# Email : info@heydari.org
 
 # update system packages
 if [[ $(command -v yum) ]]; then
