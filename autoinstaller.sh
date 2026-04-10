@@ -1,2467 +1,1710 @@
 #!/usr/bin/env bash
 #
+# Refactored Auto Installer
+# Original concept by M.A.H
+# Email: info@heydari.org
+# Refactor goal: keep features, improve structure, safety, maintainability
 
-# Coded by M.A.H
-# Email : info@heydari.org
+set -u
 
-# update system packages
-if [[ $(command -v yum) ]]; then
-  yum update -y
-  for pkg in perl wget curl screen; do
-    if ! rpm -q "${pkg}" >/dev/null 2>&1; then
-      yum install "${pkg}" -y
-    fi
-  done
-  clear
-fi
+readonly APP_NAME="Auto Installer"
+readonly VERSION="2.0.0"
 
-if [[ $(command -v apt) ]]; then
-  apt update -y ; apt upgrade -y ; apt autoremove -y
-  for pkg in perl wget curl screen; do
-    if ! dpkg -s "${pkg}" >/dev/null 2>&1; then
-      apt install "${pkg}" -y
-    fi
-  done
-  clear
-fi
-
-# function to validate user input for y/n choices
-function validate_yn_input {
-  read -rp "$1 " INPUT
-  INPUT=$(echo "$INPUT" | tr '[:upper:]' '[:lower:]')
-  while [[ "$INPUT" != "y" && "$INPUT" != "n" ]]; do
-    echo "Invalid input. Please enter 'y' or 'n'"
-    read -rp "$1 (y/n) : " INPUT
-    INPUT=$(echo "$INPUT" | tr '[:upper:]' '[:lower:]')
-  done
-  if [ "$INPUT" = "n" ]; then
-    clear
-    return 1
-  fi
-}
-
-
-# function to validate user input for menu choices
-function validate_menu_input {
-  read -rp "$1" INPUT
-  while ! [[ "$INPUT" =~ ^[0-9]+$ ]] || (( INPUT < $2 || INPUT > $3 )); do
-    echo "Invalid input. Please enter a number between $2 and $3"
-    read -rp "$1" INPUT
-  done
-}
-
-#function for text colors
+# -----------------------------
+# Colors
+# -----------------------------
 BLUE='\033[0;34m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
 NC='\033[0m'
-# Function to print text in colors
-print_b () {
-  echo -e "${BLUE}$1${NC}"
-}
-print_r () {
-  echo -e "${RED}$1${NC}"
-}
-print_y () {
-  echo -e "${YELLOW}$1${NC}"
-}
-print_g () {
-  echo -e "${GREEN}$1${NC}"
-}
 
-# Run hostnamectl and save the output to a variable
-output=$(hostnamectl)
-# Extract the desired information from the output using grep and sed
-hostname=$(echo "$output" | grep "Static hostname:" | sed 's/Static hostname:\s*//')
-virtualization=$(echo "$output" | grep "Virtualization:" | sed 's/Virtualization:\s*//')
-os=$(echo "$output" | grep "Operating System:" | sed 's/Operating System:\s*//')
-kernel=$(echo "$output" | grep "Kernel:" | sed 's/Kernel:\s*//')
-architecture=$(echo "$output" | grep "Architecture:" | sed 's/Architecture:\s*//')
-vendor=$(echo "$output" | grep "Hardware Vendor:" | sed 's/Hardware Vendor:\s*//')
-model=$(echo "$output" | grep "Hardware Model:" | sed 's/Hardware Model:\s*//')
-CPU_NAME=$(grep "model name" /proc/cpuinfo | head -n 1 | cut -d':' -f2 | sed 's/^[ \t]*//')
-CPU_CORES=$(grep -c processor /proc/cpuinfo)
-MEM_TOTAL=$(free -h | awk '/^Mem/ {print $2}')
-HDD_TOTAL=$(df -h --total | tail -n 1 | awk '{print $2}')
-IP_ADDRESS=$(hostname -I | awk '{print $1}')
+print_b() { echo -e "${BLUE}$*${NC}"; }
+print_r() { echo -e "${RED}$*${NC}"; }
+print_y() { echo -e "${YELLOW}$*${NC}"; }
+print_g() { echo -e "${GREEN}$*${NC}"; }
 
-# Print the extracted information
-information () {
-echo -e "\033[33m  Static Hostname\033[0m :\033[34m${hostname}\033[0m"
-echo -e "\033[33m  Virtualization\033[0m :\033[34m${virtualization}\033[0m"
-echo -e "\033[33m  Operating System\033[0m : \033[34m${os}\033[0m"
-echo -e "\033[33m  Kernel\033[0m :\033[34m${kernel}\033[0m"
-echo -e "\033[33m  Architecture\033[0m :\033[34m${architecture}\033[0m"
-echo -e "\033[33m  Hardware Vendor\033[0m :\033[34m${vendor}\033[0m"
-echo -e "\033[33m  Hardware Model\033[0m :\033[34m${model}\033[0m"
-echo -e "\033[33m  CPU\033[0m : \033[34m${CPU_NAME} (${CPU_CORES} Cores)\033[0m"
-echo -e "\033[33m  Memory\033[0m : \033[34m${MEM_TOTAL}\033[0m"
-echo -e "\033[33m  Hard Disk\033[0m : \033[34m${HDD_TOTAL}\033[0m"
-echo -e "\033[33m  IP Address\033[0m : \033[34m${IP_ADDRESS}\033[0m"
-}
-# Banner
+# -----------------------------
+# Banners
+# -----------------------------
 message='
 
-    /$$$$$$              /$$                     /$$$$$$                       /$$               /$$ /$$                    
-   /$$__  $$            | $$                    |_  $$_/                      | $$              | $$| $$                    
-  | $$  \ $$ /$$   /$$ /$$$$$$    /$$$$$$         | $$   /$$$$$$$   /$$$$$$$ /$$$$$$    /$$$$$$ | $$| $$  /$$$$$$   /$$$$$$ 
+    /$$$$$$              /$$                     /$$$$$$                       /$$               /$$ /$$
+   /$$__  $$            | $$                    |_  $$_/                      | $$              | $$| $$
+  | $$  \ $$ /$$   /$$ /$$$$$$    /$$$$$$         | $$   /$$$$$$$   /$$$$$$$ /$$$$$$    /$$$$$$ | $$| $$  /$$$$$$   /$$$$$$
   | $$$$$$$$| $$  | $$|_  $$_/   /$$__  $$        | $$  | $$__  $$ /$$_____/|_  $$_/   |____  $$| $$| $$ /$$__  $$ /$$__  $$
   | $$__  $$| $$  | $$  | $$    | $$  \ $$        | $$  | $$  \ $$|  $$$$$$   | $$      /$$$$$$$| $$| $$| $$$$$$$$| $$  \__/
-  | $$  | $$| $$  | $$  | $$ /$$| $$  | $$        | $$  | $$  | $$ \____  $$  | $$ /$$ /$$__  $$| $$| $$| $$_____/| $$      
-  | $$  | $$|  $$$$$$/  |  $$$$/|  $$$$$$/       /$$$$$$| $$  | $$ /$$$$$$$/  |  $$$$/|  $$$$$$$| $$| $$|  $$$$$$$| $$      
-  |__/  |__/ \______/    \___/   \______/       |______/|__/  |__/|_______/    \___/   \_______/|__/|__/ \_______/|__/      
+  | $$  | $$| $$  | $$  | $$ /$$| $$  | $$        | $$  | $$  | $$ \____  $$  | $$ /$$ /$$__  $$| $$| $$| $$_____/| $$
+  | $$  | $$|  $$$$$$/  |  $$$$/|  $$$$$$/       /$$$$$$| $$  | $$ /$$$$$$$/  |  $$$$/|  $$$$$$$| $$| $$|  $$$$$$$| $$
+  |__/  |__/ \______/    \___/   \______/       |______/|__/  |__/|_______/    \___/   \_______/|__/|__/ \_______/|__/
                                                                                                                         #DevURANIUM
                                                                                                                         @DevURANIUM
 '
+
 cPanel='
-       ____                  _ 
+       ____                  _
    ___|  _ \ __ _ _ __   ___| |
   / __| |_) / _` | `_ \ / _ \ |
  | (__|  __/ (_| | | | |  __/ |
   \___|_|   \__,_|_| |_|\___|_|
-
 '
+
 Plesk='
-  ____  _           _    
+  ____  _           _
  |  _ \| | ___  ___| | __
  | |_) | |/ _ \/ __| |/ /
- |  __/| |  __/\__ \   < 
+ |  __/| |  __/\__ \   <
  |_|   |_|\___||___/_|\_\
-
 '
+
 aaPanel='
-              ____                  _ 
+              ____                  _
    __ _  __ _|  _ \ __ _ _ __   ___| |
   / _` |/ _` | |_) / _` | `_ \ / _ \ |
  | (_| | (_| |  __/ (_| | | | |  __/ |
   \__,_|\__,_|_|   \__,_|_| |_|\___|_|
-
 '
+
 InstallcPanel='
-  ___           _        _ _        ____                  _ 
+  ___           _        _ _        ____                  _
  |_ _|_ __  ___| |_ __ _| | |   ___|  _ \ __ _  ___ _ __ | |
   | || `_ \/ __| __/ _` | | |  / __| |_) / _` |/ _ \ `_ \| |
   | || | | \__ \ || (_| | | | | (__|  __/ (_| |  __/ | | | |
  |___|_| |_|___/\__\__,_|_|_|  \___|_|   \__,_|\___|_| |_|_|
-
 '
+
 InstallPlesk='
-  ___           _        _ _   ____  _           _    
+  ___           _        _ _   ____  _           _
  |_ _|_ __  ___| |_ __ _| | | |  _ \| | ___  ___| | __
   | || `_ \/ __| __/ _` | | | | |_) | |/ _ \/ __| |/ /
-  | || | | \__ \ || (_| | | | |  __/| |  __/\__ \   < 
+  | || | | \__ \ || (_| | | | |  __/| |  __/\__ \   <
  |___|_| |_|___/\__\__,_|_|_| |_|   |_|\___||___/_|\_\
-
 '
+
 InstallaaPanel='
-  ___           _        _ _               ____                  _ 
+  ___           _        _ _               ____                  _
  |_ _|_ __  ___| |_ __ _| | |   __ _  __ _|  _ \ __ _ _ __   ___| |
   | || `_ \/ __| __/ _` | | |  / _` |/ _` | |_) / _` | `_ \ / _ \ |
   | || | | \__ \ || (_| | | | | (_| | (_| |  __/ (_| | | | |  __/ |
  |___|_| |_|___/\__\__,_|_|_|  \__,_|\__,_|_|   \__,_|_| |_|\___|_|
-
 '
+
 Tools='
-  ____                             _____           _     
- / ___|  ___ _ ____   _____ _ __  |_   _|__   ___ | |___ 
+  ____                             _____           _
+ / ___|  ___ _ ____   _____ _ __  |_   _|__   ___ | |___
  \___ \ / _ \ `__\ \ / / _ \ `__|   | |/ _ \ / _ \| / __|
   ___) |  __/ |   \ V /  __/ |      | | (_) | (_) | \__ \
  |____/ \___|_|    \_/ \___|_|      |_|\___/ \___/|_|___/
-
 '
+
 CSF='
-  ____       _                  ____ ____  _____ 
+  ____       _                  ____ ____  _____
  / ___|  ___| |_ _   _ _ __    / ___/ ___||  ___|
  \___ \ / _ \ __| | | | `_ \  | |   \___ \| |_   
   ___) |  __/ |_| |_| | |_) | | |___ ___) |  _|  
  |____/ \___|\__|\__,_| .__/   \____|____/|_|    
-                      |_|   
-                     
+                      |_|
 '
+
 Plugins='
-  ___           _        _ _   ____  _             _           
- |_ _|_ __  ___| |_ __ _| | | |  _ \| |_   _  __ _(_)_ __  ___ 
+  ___           _        _ _   ____  _             _
+ |_ _|_ __  ___| |_ __ _| | | |  _ \| |_   _  __ _(_)_ __  ___
   | || `_ \/ __| __/ _` | | | | |_) | | | | |/ _` | | `_ \/ __|
   | || | | \__ \ || (_| | | | |  __/| | |_| | (_| | | | | \__ \
  |___|_| |_|___/\__\__,_|_|_| |_|   |_|\__,_|\__, |_|_| |_|___/
-                                             |___/             
-
+                                             |___/
 '
+
 CloudLinux='
-  ____       _                  ____ _                 _ _     _                  
+  ____       _                  ____ _                 _ _     _
  / ___|  ___| |_ _   _ _ __    / ___| | ___  _   _  __| | |   (_)_ __  _   ___  __
  \___ \ / _ \ __| | | | `_ \  | |   | |/ _ \| | | |/ _` | |   | | `_ \| | | \ \/ /
-  ___) |  __/ |_| |_| | |_) | | |___| | (_) | |_| | (_| | |___| | | | | |_| |>  < 
- |____/ \___|\__|\__,_| .__/   \____|_|\___/ \__,_|\__,_|_____|_|_| |_|\__,_/_/\_\
-                      |_|                                                         
-
+  ___) |  __/ |_| |_| | |_) | | |___| | (_) | |_| | (_| | |___| | | | | |_| |>  <
+ |____/ \___|\__|\__,_| .__/   \____|_|\___/ \__,_|\__,_|_____|_|_| |_|\__,_/_/\_\\
+                      |_|
 '
+
 Advanced='
-     _       _                               _   _____           _     
-    / \   __| |_   ____ _ _ __   ___ ___  __| | |_   _|__   ___ | |___ 
+     _       _                               _   _____           _
+    / \   __| |_   ____ _ _ __   ___ ___  __| | |_   _|__   ___ | |___
    / _ \ / _` \ \ / / _` | `_ \ / __/ _ \/ _` |   | |/ _ \ / _ \| / __|
   / ___ \ (_| |\ V / (_| | | | | (_|  __/ (_| |   | | (_) | (_) | \__ \
  /_/   \_\__,_| \_/ \__,_|_| |_|\___\___|\__,_|   |_|\___/ \___/|_|___/
-
 '
+
 FTP='
-  ____       _                 _____ _____ ____    ____                           
- / ___|  ___| |_ _   _ _ __   |  ___|_   _|  _ \  / ___|  ___ _ ____   _____ _ __ 
+  ____       _                 _____ _____ ____    ____
+ / ___|  ___| |_ _   _ _ __   |  ___|_   _|  _ \  / ___|  ___ _ ____   _____ _ __
  \___ \ / _ \ __| | | | `_ \  | |_    | | | |_) | \___ \ / _ \ `__\ \ / / _ \ `__|
-  ___) |  __/ |_| |_| | |_) | |  _|   | | |  __/   ___) |  __/ |   \ V /  __/ |   
- |____/ \___|\__|\__,_| .__/  |_|     |_| |_|     |____/ \___|_|    \_/ \___|_|   
-                      |_|                                                         
-
+  ___) |  __/ |_| |_| | |_) | |  _|   | | |  __/   ___) |  __/ |   \ V /  __/ |
+ |____/ \___|\__|\__,_| .__/  |_|     |_| |_|     |____/ \___|_|    \_/ \___|_|
+                      |_|
 '
+
 Management='
-  ____       _                 __  __                                                   _   
- / ___|  ___| |_ _   _ _ __   |  \/  | __ _ _ __   __ _  __ _  ___ _ __ ___   ___ _ __ | |_ 
+  ____       _                 __  __                                                   _
+ / ___|  ___| |_ _   _ _ __   |  \/  | __ _ _ __   __ _  __ _  ___ _ __ ___   ___ _ __ | |_
  \___ \ / _ \ __| | | | `_ \  | |\/| |/ _` | `_ \ / _` |/ _` |/ _ \ `_ ` _ \ / _ \ `_ \| __|
-  ___) |  __/ |_| |_| | |_) | | |  | | (_| | | | | (_| | (_| |  __/ | | | | |  __/ | | | |_ 
+  ___) |  __/ |_| |_| | |_) | | |  | | (_| | | | | (_| | (_| |  __/ | | | | |  __/ | | | |_
  |____/ \___|\__|\__,_| .__/  |_|  |_|\__,_|_| |_|\__,_|\__, |\___|_| |_| |_|\___|_| |_|\__|
-                      |_|                               |___/                               
-
+                      |_|                               |___/
 '
+
 WebServer='
- __        __   _    ____                           
- \ \      / /__| |__/ ___|  ___ _ ____   _____ _ __ 
+ __        __   _    ____
+ \ \      / /__| |__/ ___|  ___ _ ____   _____ _ __
   \ \ /\ / / _ \ `_ \___ \ / _ \ `__\ \ / / _ \ `__|
-   \ V  V /  __/ |_) |__) |  __/ |   \ V /  __/ |   
-    \_/\_/ \___|_.__/____/ \___|_|    \_/ \___|_|   
-
+   \ V  V /  __/ |_) |__) |  __/ |   \ V /  __/ |
+    \_/\_/ \___|_.__/____/ \___|_|    \_/ \___|_|
 '
+
 Mysql='
-  ____       _                 __  __                 _ 
+  ____       _                 __  __                 _
  / ___|  ___| |_ _   _ _ __   |  \/  |_   _ ___  __ _| |
  \___ \ / _ \ __| | | | `_ \  | |\/| | | | / __|/ _` | |
   ___) |  __/ |_| |_| | |_) | | |  | | |_| \__ \ (_| | |
  |____/ \___|\__|\__,_| .__/  |_|  |_|\__, |___/\__, |_|
-                      |_|             |___/        |_|  
-
+                      |_|             |___/        |_|
 '
+
 Redis='
-  ____       _                 ____          _ _     
- / ___|  ___| |_ _   _ _ __   |  _ \ ___  __| (_)___ 
+  ____       _                 ____          _ _
+ / ___|  ___| |_ _   _ _ __   |  _ \ ___  __| (_)___
  \___ \ / _ \ __| | | | `_ \  | |_) / _ \/ _` | / __|
   ___) |  __/ |_| |_| | |_) | |  _ <  __/ (_| | \__ \
  |____/ \___|\__|\__,_| .__/  |_| \_\___|\__,_|_|___/
-                      |_|                            
-
+                      |_|
 '
+
 Memcached='
-  ____       _                 __  __                               _              _ 
+  ____       _                 __  __                               _              _
  / ___|  ___| |_ _   _ _ __   |  \/  | ___ _ __ ___   ___ __ _  ___| |__   ___  __| |
  \___ \ / _ \ __| | | | `_ \  | |\/| |/ _ \ `_ ` _ \ / __/ _` |/ __| `_ \ / _ \/ _` |
   ___) |  __/ |_| |_| | |_) | | |  | |  __/ | | | | | (_| (_| | (__| | | |  __/ (_| |
  |____/ \___|\__|\__,_| .__/  |_|  |_|\___|_| |_| |_|\___\__,_|\___|_| |_|\___|\__,_|
-                      |_|                                                            
-
+                      |_|
 '
 
+# -----------------------------
+# Global state
+# -----------------------------
+OS_ID="unknown"
+OS_LIKE=""
+PKG_MANAGER=""
+SSH_SERVICE="sshd"
+APACHE_SERVICE="apache2"
+MYSQL_SERVICE="mysql"
+IP_ADDRESS=""
+INPUT=""
 
-# main menu
-while true; do
-  clear
-  echo -e "\033[0;32m${message}\033[0m"
-  echo -e "\033[34minformation Server\033[0m"
-  information
-  echo
-  print_y "Which control panel do you want to install?"
-  print_g "1) cPanel"
-  print_g "2) Plesk"
-  print_g "3) aaPanel"
-  print_g "4) Exit"
-  validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-  CP_CHOICE=$INPUT
-
-  if [ $CP_CHOICE -eq 4 ]; then
-    clear
-    exit
+# -----------------------------
+# Helpers
+# -----------------------------
+require_root() {
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    print_r "Please run this script as root."
+    exit 1
   fi
-  # sub-menu for cPanel
-  if [ $CP_CHOICE -eq 1 ]; then
-    clear
-    while true; do
-      echo -e "\033[0;32m${cPanel}\033[0m"
-      print_y "What do you want to do?"
-      print_g "1) Install cPanel"
-      print_g "2) Server Tools [4]"
-      print_g "3) Setup CSF [4]"
-      print_g "4) install Plugins [8]"
-      print_g "5) Setup CloudLinux [7]"
-      print_g "6) Setup FTP Server [3]"
-      print_g "7) Advanced Tools [4]"
-      print_g "8) Back to Menu"
-      validate_menu_input "$(print_y 'Enter your choice (1-8) : ')" 1 8
-      CP_ACTION=$INPUT
+}
 
-      if [ $CP_ACTION -eq 8 ]; then
-        clear
-        break
-      fi
+pause_screen() {
+  read -r -p "Press Enter to continue..." _
+}
 
-        # Install cPanel
-      if [ $CP_ACTION -eq 1 ]; then
-        clear
-        echo -e "\033[0;32m${InstallcPanel}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Install cPanel?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          cd /home && curl -o latest -L https://securedownloads.cpanel.net/latest && sh latest
-        fi
-      fi
+clear_screen() {
+  clear 2>/dev/null || true
+}
 
-        # Server Tools
-      if [ $CP_ACTION -eq 2 ]; then
-        clear
-        echo -e "\033[0;32m${Tools}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Server Tools?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Change Nameserver"
-            print_g "2) Change Hostname"
-            print_g "3) Change SSH Port"
-            print_g "4) Change Password (root)"
-            print_g "5) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-5) : ')" 1 5
-            ST_ACTION=$INPUT
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
 
-              # Change Nameserver
-            if [ $ST_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to change the Nameserver?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -p "Enter Primary Nameserver: " PRIMARY_NS
-                read -p "Enter Secondary Nameserver: " SECONDARY_NS
-                if [ -f /etc/resolv.conf ]; then
-                  sed -i 's/^nameserver/#nameserver/g' /etc/resolv.conf
-                  echo "nameserver $PRIMARY_NS" >> /etc/resolv.conf
-                  echo "nameserver $SECONDARY_NS" >> /etc/resolv.conf
-                  print_b "Nameserver Changed To -> [ "$PRIMARY_NS" - "$SECONDARY_NS" ]"
-                fi
-              fi
-            fi
+service_restart_any() {
+  local svc="$1"
+  systemctl restart "$svc" 2>/dev/null || service "$svc" restart 2>/dev/null
+}
 
-              # Change hostname
-            if [ $ST_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to change the Hostname?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -rp "Enter your Hostname : " HOSTNAME
-                hostnamectl set-hostname $HOSTNAME
-                print_b "Hostname Changed To -> "$HOSTNAME""
-              fi
-            fi
+service_action() {
+  local svc="$1"
+  local action="$2"
+  systemctl "$action" "$svc" 2>/dev/null || service "$svc" "$action" 2>/dev/null
+}
 
-              # Change SSH Port
-            if [ $ST_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change SSH Port?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -rp "Enter new SSH port : " NEW_PORT
-                sudo sed -i "s/^#*Port 22/Port $NEW_PORT/" /etc/ssh/sshd_config
-                service sshd restart
-                print_b "SSH Port Changed To -> "$NEW_PORT""
-              fi
-            fi
+is_yes() {
+  [[ "$1" == "y" ]]
+}
 
-              # Change Password (root)
-            if [ $ST_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change Password Server?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ $(whoami) = "root" ]; then
-                  passwd root
-                else
-                  sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && sudo systemctl restart ssh && sudo passwd
-                fi
-                print_b "Password Changed (root) Successfully"
-              fi
-            fi
-            if [ $ST_ACTION -eq 5 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
+validate_yn_input() {
+  local prompt="$1"
+  while true; do
+    read -r -p "$prompt " INPUT
+    INPUT=$(printf '%s' "$INPUT" | tr '[:upper:]' '[:lower:]')
+    case "$INPUT" in
+      y|n) return 0 ;;
+      *) print_r "Invalid input. Please enter y or n." ;;
+    esac
+  done
+}
 
-        # Setup CSF
-      if [ $CP_ACTION -eq 3 ]; then
-        clear
-        echo -e "\033[0;32m${CSF}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup CSF?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Install CSF"
-            print_g "2) CSF Configuration"
-            print_g "3) CSF Blocklists Configuration"
-            print_g "4) Unblock Telegram IPs"
-            print_g "5) Uninstall CSF"
-            print_g "6) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-6) : ')" 1 6
-            CSF_ACTION=$INPUT
+confirm_or_return() {
+  local prompt="$1"
+  validate_yn_input "$prompt"
+  is_yes "$INPUT"
+}
 
-              # Install CSF
-            if [ $CSF_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install CSF?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                cd /usr/src ; rm -fv csf.tgz ; wget https://download.configserver.com/csf.tgz ; tar -xzf csf.tgz ; cd csf ; sh install.sh ; perl /usr/local/csf/bin/csftest.pl ; cd
-                print_g "ConfigServer Security & Firewall (CSF) Successfully Installed"
-              fi
-            fi
+validate_menu_input() {
+  local prompt="$1"
+  local min="$2"
+  local max="$3"
 
-              #CSF Configuration
-            if [ $CSF_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Configuration CSF?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                # Set the parameters
-                TESTING="0"
-                CT_LIMIT="100"
-                CT_INTERVAL="30"
-                CT_EMAIL_ALERT="1"
-                CT_PORTS="80,443,2083,2082,2087,20,21,25,110,113,123,465,993,995,22"
-                CT_BLOCK_TIME="3600"
-                CT_PERMANENT="1"
-                CONNLIMIT="22;5,443;20,80;20,20;20,21;20,25;20,110;20,113;20,123;20,465;20,993;20,995;20,2083;20,2082;20"
-                RESTRICT_SYSLOG="3"
-                DENY_IP_LIMIT="200"
-                PACKET_FILTER="1"
-                PORTFLOOD="1"
-                # Update the csf.conf file
-                sed -i "s/^TESTING=.*/TESTING=$TESTING/g" /etc/csf/csf.conf
-                sed -i "s/^CT_LIMIT=.*/CT_LIMIT=$CT_LIMIT/g" /etc/csf/csf.conf
-                sed -i "s/^CT_INTERVAL=.*/CT_INTERVAL=$CT_INTERVAL/g" /etc/csf/csf.conf
-                sed -i "s/^CT_EMAIL_ALERT=.*/CT_EMAIL_ALERT=$CT_EMAIL_ALERT/g" /etc/csf/csf.conf
-                sed -i "s/^CT_PORTS=.*/CT_PORTS=$CT_PORTS/g" /etc/csf/csf.conf
-                sed -i "s/^CT_BLOCK_TIME=.*/CT_BLOCK_TIME=$CT_BLOCK_TIME/g" /etc/csf/csf.conf
-                sed -i "s/^CT_PERMANENT=.*/CT_PERMANENT=$CT_PERMANENT/g" /etc/csf/csf.conf
-                sed -i "s/^CONNLIMIT=.*/CONNLIMIT=$CONNLIMIT/g" /etc/csf/csf.conf
-                sed -i "s/^RESTRICT_SYSLOG=.*/RESTRICT_SYSLOG=$RESTRICT_SYSLOG/g" /etc/csf/csf.conf
-                sed -i "s/^DENY_IP_LIMIT=.*/DENY_IP_LIMIT=$DENY_IP_LIMIT/g" /etc/csf/csf.conf
-                sed -i "s/^PACKET_FILTER=.*/PACKET_FILTER=$PACKET_FILTER/g" /etc/csf/csf.conf
-                sed -i "s/^PORTFLOOD=.*/PORTFLOOD=$PORTFLOOD/g" /etc/csf/csf.conf
-                print_b "CSF configuration is successfully."
-              fi
-            fi
+  while true; do
+    read -r -p "$prompt" INPUT
+    if [[ "$INPUT" =~ ^[0-9]+$ ]] && (( INPUT >= min && INPUT <= max )); then
+      return 0
+    fi
+    print_r "Invalid input. Please enter a number between $min and $max"
+  done
+}
 
-              # CSF Blocklists Configuration
-            if [ $CSF_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to CSF Blocklists Configuration?(y/n) :')"
-                if [ $INPUT = "y" ]; then
-                  while read line; do
-                    # Check if the line starts with #
-                    if [[ $line == \#* ]]; then
-                      # Skip comment lines
-                      continue
-                    fi
-                    # Split the line by | character
-                    IFS='|' read -ra arr <<< "$line"
-                  done < /etc/csf/csf.blocklists | sed 's/# Split the line by | character//'
-                  print_b "CSF Blocklists Configuration is Successfully."
-                fi
-            fi
+safe_read() {
+  local var_name="$1"
+  local prompt="$2"
+  read -r -p "$prompt" "$var_name"
+}
 
-              # Unblock Telegram IPs
-            if [ $CSF_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Unblock Telegram IPs?(y/n) :')"
-                if [ $INPUT = "y" ]; then
-                  csf -a 149.154.168.0/22 ; csf -a 149.154.164.0/22 ; csf -a 149.154.172.0/22 ; csf -a 149.154.160.0/22 ; csf -a 91.108.4.0/22 ; csf -a 91.108.56.0/22 ; csf -a 91.108.16.0/22 ; csf -a 91.108.12.0/22 ; csf -a 91.108.8.0/22
-                  print_b "Unblock Telegram IPs is Successfully."
-                fi
-            fi
+replace_or_append_key_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
 
-              # uninstall CSF
-            if [ $CSF_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Uninstall CSF?(y/n) :')"
-                if [ $INPUT = "y" ]; then
-                  cd /etc/csf ; sh uninstall.sh
-                  print_b "Uninstall CSF is Successfully."
-                fi
-            fi
-            if [ $CSF_ACTION -eq 6 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
+  [[ -f "$file" ]] || return 1
 
-        # Install Plugins
-      if [ $CP_ACTION -eq 4 ]; then
-        clear
-        echo -e "\033[0;32m${Plugins}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Install Plugins?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Install LiteSpeed"
-            print_g "2) Install ImunifyAV"
-            print_g "3) Install SSL"
-            print_g "4) Install WHMReseller"
-            print_g "5) Install WP Toolkit"
-            print_g "6) Install PostgreSQL"
-            print_g "7) Install Softaculous"
-            print_g "8) Install SitePad"
-            print_g "9) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-9) : ')" 1 9
-            PG_ACTION=$INPUT
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    echo "${key}=${value}" >> "$file"
+  fi
+}
 
-              # Install LiteSpeed
-            if [ $PG_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install LiteSpeed?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                cd /usr/src ; wget http://www.litespeedtech.com/packages/cpanel/lsws_whm_plugin_install.sh ; chmod 700 lsws_whm_plugin_install.sh ; ./lsws_whm_plugin_install.sh ; rm -f lsws_whm_plugin_install.sh ; cd
-                print_b "LiteSpeed Successfully Installed"
-              fi
-            fi
+load_os_info() {
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_LIKE="${ID_LIKE:-}"
+  fi
 
-              # Install ImunifyAV
-            if [ $PG_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install ImunifyAV?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                wget https://repo.imunify360.cloudlinux.com/defence360/imav-deploy.sh ; bash imav-deploy.sh ; rm -rf /root/imav-deploy.sh
-                print_b "ImunifyAV Successfully Installed"
-              fi
-            fi
+  if command_exists apt; then
+    PKG_MANAGER="apt"
+    SSH_SERVICE="ssh"
+    APACHE_SERVICE="apache2"
+    MYSQL_SERVICE="mysql"
+  elif command_exists dnf; then
+    PKG_MANAGER="dnf"
+    SSH_SERVICE="sshd"
+    APACHE_SERVICE="httpd"
+    MYSQL_SERVICE="mysqld"
+  elif command_exists yum; then
+    PKG_MANAGER="yum"
+    SSH_SERVICE="sshd"
+    APACHE_SERVICE="httpd"
+    MYSQL_SERVICE="mysqld"
+  else
+    PKG_MANAGER="unknown"
+  fi
+}
 
-              # Install SSL
-            if [ $PG_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install SSL?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                /usr/local/cpanel/bin/checkallsslcerts ; /scripts/install_lets_encrypt_autossl_provider
-                print_b "Let's Encrypt Autossl (SSL) Successfully Installed"
-              fi
-            fi
+update_system_packages() {
+  case "$PKG_MANAGER" in
+    yum)
+      yum update -y
+      for pkg in perl wget curl screen tar unzip; do
+        rpm -q "$pkg" >/dev/null 2>&1 || yum install -y "$pkg"
+      done
+      ;;
+    dnf)
+      dnf update -y
+      for pkg in perl wget curl screen tar unzip; do
+        rpm -q "$pkg" >/dev/null 2>&1 || dnf install -y "$pkg"
+      done
+      ;;
+    apt)
+      apt update -y
+      apt upgrade -y
+      apt autoremove -y
+      for pkg in perl wget curl screen tar unzip; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || apt install -y "$pkg"
+      done
+      ;;
+    *)
+      print_r "Unsupported package manager. Skipping package bootstrap."
+      ;;
+  esac
+}
 
-              # Install WHMReseller
-            if [ $PG_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install WHMReseller?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"centos"* ]]; then
-                  yum install gcc-c++ -y ; cd /usr/local/cpanel/whostmgr/docroot/cgi ; wget http://deasoft.com/install.cpp ; g++ install.cpp -o install ; chmod 700 install ; ./install ; cd
-                  print_b "WHMReseller Successfully Installed"
-                else
-                  print_r "WHMReseller installation is only supported on CentOS."
-                fi
-              fi
-            fi
+collect_server_info() {
+  local output hostnamectl_available
+  hostnamectl_available=0
 
-              # Install WP Toolkit
-            if [ $PG_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install WP Toolkit?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ $WP_ACTION -eq 1 ]; then
-                  sh <(curl https://wp-toolkit.plesk.com/cPanel/installer.sh || wget -O - https://wp-toolkit.plesk.com/cPanel/installer.sh)
-                  print_b "WP Toolkit Successfully Installed"
-                fi
-              fi
-            fi
+  if command_exists hostnamectl; then
+    hostnamectl_available=1
+    output=$(hostnamectl 2>/dev/null || true)
+  else
+    output=""
+  fi
 
-              # Install PostgreSQL
-            if [ $PG_ACTION -eq 6 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install PostgreSQL?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"centos"* ]]; then
-                    yum install postgresql-server -y ; systemctl enable postgresql.service ; systemctl start postgresql.service ; /usr/local/cpanel/scripts/installpostgres
-                    print_b "PostgreSQL Successfully Installed"
-                else
-                    print_r "PostgreSQL installation is only supported on CentOS."
-                fi
-              fi
-            fi
+  HOSTNAME_VALUE=$(hostname 2>/dev/null || echo "unknown")
+  VIRTUALIZATION=$(echo "$output" | awk -F': ' '/Virtualization:/ {print $2}')
+  OPERATING_SYSTEM=$(echo "$output" | awk -F': ' '/Operating System:/ {print $2}')
+  KERNEL=$(uname -r 2>/dev/null || echo "unknown")
+  ARCHITECTURE=$(uname -m 2>/dev/null || echo "unknown")
+  VENDOR=$(echo "$output" | awk -F': ' '/Hardware Vendor:/ {print $2}')
+  MODEL=$(echo "$output" | awk -F': ' '/Hardware Model:/ {print $2}')
+  CPU_NAME=$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null)
+  CPU_CORES=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo "unknown")
+  MEM_TOTAL=$(free -h 2>/dev/null | awk '/^Mem:/ {print $2}')
+  HDD_TOTAL=$(df -h --total 2>/dev/null | awk 'END {print $2}')
+  IP_ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}')
 
-              # Install Softaculous
-            if [ $PG_ACTION -eq 7 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure that ioncube is installed and active on your server?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if php -m | grep -q ionCube ; then
-                  wget -N http://files.softaculous.com/install.sh && chmod 755 install.sh && ./install.sh
-                  print_b "Softaculous Successfully Installed"
-                else
-                  print_r "Error: ionCube is not installed on your server.
-                  Please go to this address to install and activate ionCube -> Home / Server Configuration / Tweak Settings -> PHP -> cPanel PHP loader"
-                fi
-              fi
-            fi
+  [[ -n "$OPERATING_SYSTEM" ]] || OPERATING_SYSTEM="${PRETTY_NAME:-$OS_ID}"
+  [[ -n "$VIRTUALIZATION" ]] || VIRTUALIZATION="unknown"
+  [[ -n "$VENDOR" ]] || VENDOR="unknown"
+  [[ -n "$MODEL" ]] || MODEL="unknown"
+  [[ -n "$CPU_NAME" ]] || CPU_NAME="unknown"
+  [[ -n "$MEM_TOTAL" ]] || MEM_TOTAL="unknown"
+  [[ -n "$HDD_TOTAL" ]] || HDD_TOTAL="unknown"
+  [[ -n "$IP_ADDRESS" ]] || IP_ADDRESS="unknown"
+}
 
-              # Install SitePad
-            if [ $PG_ACTION -eq 8 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure that ioncube is installed and active on your server?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if php -m | grep -q ionCube ; then
-                  cd /usr/local/src/ ; rm -fv install.sh ; wget -N https://files.sitepad.com/install.sh ; chmod +x install.sh ; ./install.sh ; cd
-                  print_b "SitePad Successfully Installed"
-                else
-                  print_r "Error: ionCube is not installed on your server.
-                  Please go to this address to install and activate ionCube -> Home / Server Configuration / Tweak Settings -> PHP -> cPanel PHP loader"
-                fi
-              fi
-            fi
-            if [ $PG_ACTION -eq 9 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
+information() {
+  echo -e "\033[33m  Static Hostname\033[0m : \033[34m${HOSTNAME_VALUE}\033[0m"
+  echo -e "\033[33m  Virtualization\033[0m : \033[34m${VIRTUALIZATION}\033[0m"
+  echo -e "\033[33m  Operating System\033[0m : \033[34m${OPERATING_SYSTEM}\033[0m"
+  echo -e "\033[33m  Kernel\033[0m : \033[34m${KERNEL}\033[0m"
+  echo -e "\033[33m  Architecture\033[0m : \033[34m${ARCHITECTURE}\033[0m"
+  echo -e "\033[33m  Hardware Vendor\033[0m : \033[34m${VENDOR}\033[0m"
+  echo -e "\033[33m  Hardware Model\033[0m : \033[34m${MODEL}\033[0m"
+  echo -e "\033[33m  CPU\033[0m : \033[34m${CPU_NAME} (${CPU_CORES} Cores)\033[0m"
+  echo -e "\033[33m  Memory\033[0m : \033[34m${MEM_TOTAL}\033[0m"
+  echo -e "\033[33m  Hard Disk\033[0m : \033[34m${HDD_TOTAL}\033[0m"
+  echo -e "\033[33m  IP Address\033[0m : \033[34m${IP_ADDRESS}\033[0m"
+}
 
-        # Setup CloudLinux
-      if [ $CP_ACTION -eq 5 ]; then
-        clear
-        echo -e "\033[0;32m${CloudLinux}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup CloudLinux?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Install CloudLinux"
-            print_g "2) Install CageFS"
-            print_g "3) Install alt-php"
-            print_g "4) Install ea-php"
-            print_g "5) install mod-lsapi"
-            print_g "6) Install Python"
-            print_g "7) Install Ruby"
-            print_g "8) Install NodeJS"
-            print_g "9) Install MySQL Governor (not recommended)"
-            print_g "10) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-10) : ')" 1 10
-            CL_ACTION=$INPUT
+is_centos_family() {
+  [[ "$OS_ID" == "centos" || "$OS_ID" == "rhel" || "$OS_ID" == "almalinux" || "$OS_ID" == "rocky" || "$OS_LIKE" == *"rhel"* ]]
+}
 
-              # Install CloudLinux
-            if [ $CL_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install CloudLinux?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"centos"* ]]; then
-                  wget https://repo.cloudlinux.com/cloudlinux/sources/cln/cldeploy -O cldeploy.sh
-                    print_g "Get a 30-day CloudLinux License : https://www.cloudlinux.com/trial"
-                    validate_yn_input "$(print_y 'Do you use the free 30-day License?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      read -rp "Enter your License : " License
-                      sh cldeploy.sh -k "$License"
-                      print_b "CloudLinux Successfully Installed, Please Reboot Your System"
-                    else
-                      print_g "Use your installation and activation command"
-                    fi
-                else
-                  print_r "CloudLinux installation is only supported on CentOS."
-                fi
-              fi
-            fi
+is_ubuntu_family() {
+  [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" || "$OS_LIKE" == *"debian"* ]]
+}
 
-              # Install CageFS
-            if [ $CL_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install CageFS?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum install cagefs -y ; /usr/sbin/cagefsctl --init ; /usr/sbin/cagefsctl --enable-all
-                  print_b "CageFS Successfully Installed"
-                else
-                  print_r "CageFS installation is only supported on CentOS with CloudLinux."
-                fi
-              fi
-            fi
+is_cloudlinux() {
+  [[ "$OS_ID" == "cloudlinux" || "$OS_LIKE" == *"cloudlinux"* ]]
+}
 
-              # Install alt-php
-            if [ $CL_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install alt-php?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum groupinstall alt-php -y ; yum update cagefs lvemanager -y ; yum groupupdate alt-php -y
-                  print_b "alt-php Successfully Installed"
-                else
-                  print_r "alt-php installation is only supported on CentOS."
-                fi
-              fi
-            fi
+# -----------------------------
+# Common Server Tools
+# -----------------------------
+change_nameserver() {
+  confirm_or_return "Are you sure you want to change the Nameserver? (y/n):" || return 0
 
-              # Install ea-php
-            if [ $CL_ACTION -eq 4 ]; then
-              clear
-              validate_yn_input "$(print_y 'Are you sure you want to install ea-php? (y/n): ')"
+  local primary_ns secondary_ns backup_file
+  safe_read primary_ns "Enter Primary Nameserver: "
+  safe_read secondary_ns "Enter Secondary Nameserver: "
 
-              if [ "$INPUT" = "y" ]; then
-                if grep -qw "ID=cloudlinux" /etc/os-release; then
-                  # List all PHP versions to install
-                  PHP_VERSIONS=("ea-php82" "ea-php81" "ea-php80" "ea-php74" "ea-php73" "ea-php72" "ea-php71" "ea-php70" "ea-php51" "ea-php52" "ea-php53" "ea-php54" "ea-php55" "ea-php56")
-                  # Install each PHP version
-                  for PHP in "${PHP_VERSIONS[@]}"; do
-                    yum install -y "$PHP"
-                  done
-                  # Update cagefs and lvemanager
-                  yum update -y cagefs lvemanager
-                  print_b "ea-php successfully installed."
-                else
-                  print_r "ea-php installation is only supported on CloudLinux."
-                fi
-              fi
-            fi
+  if [[ -f /etc/resolv.conf ]]; then
+    backup_file="/etc/resolv.conf.bak.$(date +%Y%m%d%H%M%S)"
+    cp -f /etc/resolv.conf "$backup_file"
+    {
+      echo "nameserver $primary_ns"
+      echo "nameserver $secondary_ns"
+    } > /etc/resolv.conf
+    print_b "Nameserver changed to -> [ $primary_ns - $secondary_ns ]"
+    print_g "Backup saved at: $backup_file"
+  else
+    print_r "/etc/resolv.conf not found."
+  fi
+  pause_screen
+}
 
-              # Install mod-lsapi
-            if [ $CL_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install mod-lsapi?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum install liblsapi liblsapi-devel ; yum install ea-apache24-mod_lsapi ; /usr/bin/switch_mod_lsapi --setup ; service httpd restart
-                  print_b "mod-lsapi Successfully Installed"
-                else
-                  print_r "mod-lsapi installation is only supported on CentOS."
-                fi
-              fi
-            fi
+change_hostname() {
+  confirm_or_return "Are you sure you want to change the Hostname? (y/n):" || return 0
 
-              # Install Python
-            if [ $CL_ACTION -eq 6 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install Python?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum -y groupinstall "Development Tools"
-                  yum -y install openssl-devel bzip2-devel libffi-devel
-                  yum groupinstall alt-python -y
-                  yum install lvemanager lve-utils alt-python-virtualenv
-                  yum install lve-utils lvemanager alt-python-virtualenv alt-mod-passenger -y
-                  yum install lvemanager alt-python-virtualenv
-                  yum install alt-python27-devel -y
-                  print_b "Python Successfully Installed"
-                else
-                  print_r "Python installation is only supported on CentOS."
-                fi
-              fi
-            fi
+  local new_hostname
+  safe_read new_hostname "Enter your Hostname: "
+  if [[ -n "$new_hostname" ]]; then
+    hostnamectl set-hostname "$new_hostname"
+    print_b "Hostname changed to -> $new_hostname"
+  else
+    print_r "Hostname cannot be empty."
+  fi
+  pause_screen
+}
 
-              # Install Ruby
-            if [ $CL_ACTION -eq 7 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install Ruby?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum grouplist | grep alt-ruby
-                  yum groupinstall alt-ruby -y
-                  yum install lvemanager alt-python-virtualenv
-                  yum install ea-ruby24-mod_passenger -y
-                  print_b "Ruby Successfully Installed"
-                else
-                    print_r "Ruby installation is only supported on CentOS."
-                fi
-              fi
-            fi
+change_ssh_port() {
+  confirm_or_return "Are you sure you want to change SSH Port? (y/n):" || return 0
 
-              # Install NodeJS
-            if [ $CL_ACTION -eq 8 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install NodeJS?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum groupinstall alt-nodejs -y
-                  yum install lvemanager lve-utils -y
-                  yum install lvemanager lve-utils alt-mod-passenger -y
-                  print_b "NodeJS Successfully Installed"
-                else
-                  print_r "NodeJS installation is only supported on CentOS."
-                fi
-              fi
-            fi
+  local new_port ssh_config backup_file
+  safe_read new_port "Enter new SSH port: "
 
-              # Install MySQL Governor
-            if [ $CL_ACTION -eq 9 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install MySQL Governor?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"cloudlinux"* ]]; then
-                  yum remove db-governor db-governor-mysql
-                  yum install governor-mysql -y
-                  read -rp "Enter Mysql Version : " MysqlV
-                  /usr/share/lve/dbgovernor/mysqlgovernor.py --mysql-version="$MysqlV"
-                  /usr/share/lve/dbgovernor/mysqlgovernor.py --install --yes
-                  /usr/share/lve/dbgovernor/mysqlgovernor.py --dbupdate
-                  service db_governor restart
-                  service db_governor start
-                  print_b "MySQL Governor Successfully Installed"
-                else
-                  print_r "MySQL Governor installation is only supported on CentOS."
-                fi
-              fi
-            fi
-            if [ $CL_ACTION -eq 10 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
+  if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
+    print_r "Invalid port number."
+    pause_screen
+    return 1
+  fi
 
-        # Setup FTP Server
-      if [ $CP_ACTION -eq 6 ]; then
-        clear
-        echo -e "\033[0;32m${FTP}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup FTP Server?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Pure-FTPd FTP Server (recommended)"
-            print_g "2) ProFTP FTP Server"
-            print_g "3) Disable FTP Services"
-            print_g "4) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-            FTP_ACTION=$INPUT
-            if [ $FTP_ACTION -eq 1 ]; then
-              /usr/local/cpanel/scripts/setupftpserver pure-ftpd
-              print_b "Pure-FTPd Successfully Configured"
-              sleep 5s
-              clear
-              break
-            elif [ $FTP_ACTION -eq 2 ]; then
-              /usr/local/cpanel/scripts/setupftpserver proftpd
-              print_b "ProFTP Successfully Configured"
-              sleep 5s
-              clear
-              break
-            elif [ $FTP_ACTION -eq 3 ]; then
-              /usr/local/cpanel/scripts/setupftpserver disabled
-              print_b "FTP Services Successfully Disabled"
-              sleep 5s
-              clear
-              break
-            elif [ $FTP_ACTION -eq 4 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
+  ssh_config="/etc/ssh/sshd_config"
+  if [[ ! -f "$ssh_config" ]]; then
+    print_r "$ssh_config not found."
+    pause_screen
+    return 1
+  fi
 
-        # Advanced Tools
-      if [ $CP_ACTION -eq 7 ]; then
-        clear
-        echo -e "\033[0;32m${Advanced}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Advanced Tools?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Restore Backup"
-            print_g "2) Clear RAM Cache"
-            print_g "3) Delete all error_log"
-            print_g "4) Clear /tmp"
-            print_g "5) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-5) : ')" 1 5
-            AT_ACTION=$INPUT
+  backup_file="${ssh_config}.bak.$(date +%Y%m%d%H%M%S)"
+  cp -f "$ssh_config" "$backup_file"
 
-              #Restore Backup
-            if [ $AT_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to restore the user backup?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -rp "Enter the location home Directory (by default /home) : " directory
-                if [ -z "$directory" ]; then
-                  cd /home
-                  read -rp "Enter Link Backup : " BackUP
-                  print_g "Downloading the backup file..."
-                  wget "$BackUP"
-                  read -rp "Enter NameFile Backup : " FileBackup
-                  print_g "Restoring the backup file..."
-                  /usr/local/cpanel/scripts/restorepkg "$FileBackup"
-                else
-                  cd "$directory"
-                  read -rp "Enter Link Backup : " BackUP
-                  print_g "Downloading the backup file..."
-                  wget "$BackUP"
-                  read -rp "Enter NameFile Backup : " FileBackup
-                  print_g "Restoring the backup file..."
-                  /usr/local/cpanel/scripts/restorepkg "$FileBackup"
-                fi
-              fi
-            fi
+  if grep -qE '^#?Port ' "$ssh_config"; then
+    sed -i "s/^#\?Port .*/Port $new_port/" "$ssh_config"
+  else
+    echo "Port $new_port" >> "$ssh_config"
+  fi
 
-              # Clear RAM Cache
-            if [ $AT_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Clear RAM Cache?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                sync; echo 1 > /proc/sys/vm/drop_caches ; sync; echo 2 > /proc/sys/vm/drop_caches ; sync; echo 3 > /proc/sys/vm/drop_caches ; swapoff -a ; swapon -a
-                print_b "RAM Cache Successfully Cleared"
-              fi
-            fi
+  service_restart_any "$SSH_SERVICE"
+  print_b "SSH Port changed to -> $new_port"
+  print_g "Backup saved at: $backup_file"
+  pause_screen
+}
 
-              # Delete all error_log
-            if [ $AT_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Clear RAM Cache?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                /usr/bin/find /root*/* -type f -name error_log -exec du -sh {} \;
-                /usr/bin/find /root*/* -type f -name error_log -exec rm -rf {} \;
-                /usr/bin/find /home*/*/public_html/*/* -type f -name error_log -exec du -sh {} \;
-                /usr/bin/find /home*/*/public_html/*/* -type f -name error_log -exec rm -rf {} \;
-                print_b "all error_log Successfully Delete"
-              fi
-            fi
+change_root_password() {
+  confirm_or_return "Are you sure you want to change root password? (y/n):" || return 0
 
-              # Clear /tmp
-            if [ $AT_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Clear /tmp?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"centos"* ]]; then
-                  yum install tmpwatch -y ; /usr/sbin/tmpwatch --mtime --all 6 /tmp
-                  print_b "/tmp Successfully Cleared"
-                elif [[ $(cat /etc/os-release | grep -w "ID") == *"ubuntu"* ]]; then
-                  apt install tmpreaper -y ; /usr/sbin/tmpwatch --mtime --all 6 /tmp
-                  print_b "/tmp Successfully Cleared"
-                fi
-              fi
-            fi
-            if [ $AT_ACTION -eq 5 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
+  if [[ "$(whoami)" == "root" ]]; then
+    passwd root
+  else
+    sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    service_restart_any "$SSH_SERVICE"
+    passwd
+  fi
+
+  print_b "Password changed successfully."
+  pause_screen
+}
+
+server_tools_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Tools}\033[0m"
+    print_y "What do you want to do?"
+    print_g "1) Change Nameserver"
+    print_g "2) Change Hostname"
+    print_g "3) Change SSH Port"
+    print_g "4) Change Password (root)"
+    print_g "5) Back to Menu"
+    validate_menu_input "Enter your choice (1-5): " 1 5
+
+    case "$INPUT" in
+      1) clear_screen; change_nameserver ;;
+      2) clear_screen; change_hostname ;;
+      3) clear_screen; change_ssh_port ;;
+      4) clear_screen; change_root_password ;;
+      5) clear_screen; break ;;
+    esac
+  done
+}
+
+# -----------------------------
+# CSF
+# -----------------------------
+install_csf() {
+  confirm_or_return "Are you sure you want to install CSF? (y/n):" || return 0
+  cd /usr/src || return 1
+  rm -f csf.tgz
+  wget https://download.configserver.com/csf.tgz
+  tar -xzf csf.tgz
+  cd csf || return 1
+  sh install.sh
+  perl /usr/local/csf/bin/csftest.pl
+  print_g "ConfigServer Security & Firewall (CSF) successfully installed."
+  pause_screen
+}
+
+configure_csf() {
+  confirm_or_return "Are you sure you want to configure CSF? (y/n):" || return 0
+
+  local conf="/etc/csf/csf.conf"
+  [[ -f "$conf" ]] || { print_r "$conf not found."; pause_screen; return 1; }
+
+  replace_or_append_key_value "$conf" TESTING '"0"'
+  replace_or_append_key_value "$conf" CT_LIMIT '"100"'
+  replace_or_append_key_value "$conf" CT_INTERVAL '"30"'
+  replace_or_append_key_value "$conf" CT_EMAIL_ALERT '"1"'
+  replace_or_append_key_value "$conf" CT_PORTS '"80,443,2083,2082,2087,20,21,25,110,113,123,465,993,995,22"'
+  replace_or_append_key_value "$conf" CT_BLOCK_TIME '"3600"'
+  replace_or_append_key_value "$conf" CT_PERMANENT '"1"'
+  replace_or_append_key_value "$conf" CONNLIMIT '"22;5,443;20,80;20,20;20,21;20,25;20,110;20,113;20,123;20,465;20,993;20,995;20,2083;20,2082;20"'
+  replace_or_append_key_value "$conf" RESTRICT_SYSLOG '"3"'
+  replace_or_append_key_value "$conf" DENY_IP_LIMIT '"200"'
+  replace_or_append_key_value "$conf" PACKET_FILTER '"1"'
+  replace_or_append_key_value "$conf" PORTFLOOD '"1"'
+
+  print_b "CSF configuration updated successfully."
+  pause_screen
+}
+
+configure_csf_blocklists() {
+  confirm_or_return "Are you sure you want to configure CSF blocklists? (y/n):" || return 0
+
+  local file="/etc/csf/csf.blocklists"
+  [[ -f "$file" ]] || { print_r "$file not found."; pause_screen; return 1; }
+
+  print_y "Existing active blocklists:"
+  grep -vE '^\s*#|^\s*$' "$file" || true
+  print_b "CSF blocklists reviewed successfully."
+  pause_screen
+}
+
+unblock_telegram_ips() {
+  confirm_or_return "Are you sure you want to unblock Telegram IPs? (y/n):" || return 0
+
+  local ip
+  for ip in \
+    149.154.168.0/22 \
+    149.154.164.0/22 \
+    149.154.172.0/22 \
+    149.154.160.0/22 \
+    91.108.4.0/22 \
+    91.108.56.0/22 \
+    91.108.16.0/22 \
+    91.108.12.0/22 \
+    91.108.8.0/22; do
+    csf -a "$ip" "Telegram"
+  done
+
+  print_b "Telegram IPs unblocked successfully."
+  pause_screen
+}
+
+uninstall_csf() {
+  confirm_or_return "Are you sure you want to uninstall CSF? (y/n):" || return 0
+  cd /etc/csf || return 1
+  sh uninstall.sh
+  print_b "CSF uninstalled successfully."
+  pause_screen
+}
+
+csf_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${CSF}\033[0m"
+    print_g "1) Install CSF"
+    print_g "2) CSF Configuration"
+    print_g "3) CSF Blocklists Configuration"
+    print_g "4) Unblock Telegram IPs"
+    print_g "5) Uninstall CSF"
+    print_g "6) Back to Menu"
+    validate_menu_input "Enter your choice (1-6): " 1 6
+
+    case "$INPUT" in
+      1) clear_screen; install_csf ;;
+      2) clear_screen; configure_csf ;;
+      3) clear_screen; configure_csf_blocklists ;;
+      4) clear_screen; unblock_telegram_ips ;;
+      5) clear_screen; uninstall_csf ;;
+      6) clear_screen; break ;;
+    esac
+  done
+}
+
+# -----------------------------
+# cPanel Plugins
+# -----------------------------
+install_litespeed_cpanel() {
+  confirm_or_return "Are you sure you want to install LiteSpeed? (y/n):" || return 0
+  cd /usr/src || return 1
+  wget http://www.litespeedtech.com/packages/cpanel/lsws_whm_plugin_install.sh
+  chmod 700 lsws_whm_plugin_install.sh
+  ./lsws_whm_plugin_install.sh
+  rm -f lsws_whm_plugin_install.sh
+  print_b "LiteSpeed installed successfully."
+  pause_screen
+}
+
+install_imunifyav() {
+  confirm_or_return "Are you sure you want to install ImunifyAV? (y/n):" || return 0
+  wget https://repo.imunify360.cloudlinux.com/defence360/imav-deploy.sh -O /root/imav-deploy.sh
+  bash /root/imav-deploy.sh
+  rm -f /root/imav-deploy.sh
+  print_b "ImunifyAV installed successfully."
+  pause_screen
+}
+
+install_ssl_cpanel() {
+  confirm_or_return "Are you sure you want to install SSL? (y/n):" || return 0
+  /usr/local/cpanel/bin/checkallsslcerts
+  /scripts/install_lets_encrypt_autossl_provider
+  print_b "Let's Encrypt AutoSSL installed successfully."
+  pause_screen
+}
+
+install_whmreseller() {
+  confirm_or_return "Are you sure you want to install WHMReseller? (y/n):" || return 0
+
+  if is_centos_family; then
+    case "$PKG_MANAGER" in
+      yum) yum install gcc-c++ -y ;;
+      dnf) dnf install gcc-c++ -y ;;
+      *) print_r "Unsupported package manager for WHMReseller."; pause_screen; return 1 ;;
+    esac
+
+    cd /usr/local/cpanel/whostmgr/docroot/cgi || return 1
+    wget http://deasoft.com/install.cpp
+    g++ install.cpp -o install
+    chmod 700 install
+    ./install
+    print_b "WHMReseller installed successfully."
+  else
+    print_r "WHMReseller installation is only supported on CentOS-like systems."
+  fi
+  pause_screen
+}
+
+install_wp_toolkit_cpanel() {
+  confirm_or_return "Are you sure you want to install WP Toolkit? (y/n):" || return 0
+  sh <(curl -fsSL https://wp-toolkit.plesk.com/cPanel/installer.sh || wget -qO- https://wp-toolkit.plesk.com/cPanel/installer.sh)
+  print_b "WP Toolkit installed successfully."
+  pause_screen
+}
+
+install_postgresql_cpanel() {
+  confirm_or_return "Are you sure you want to install PostgreSQL? (y/n):" || return 0
+
+  if is_centos_family; then
+    case "$PKG_MANAGER" in
+      yum) yum install postgresql-server -y ;;
+      dnf) dnf install postgresql-server -y ;;
+      *) print_r "Unsupported package manager for PostgreSQL."; pause_screen; return 1 ;;
+    esac
+    systemctl enable postgresql.service
+    systemctl start postgresql.service
+    /usr/local/cpanel/scripts/installpostgres
+    print_b "PostgreSQL installed successfully."
+  else
+    print_r "PostgreSQL installation is only supported on CentOS-like systems."
+  fi
+  pause_screen
+}
+
+install_softaculous() {
+  confirm_or_return "Are you sure ionCube is installed and active on your server? (y/n):" || return 0
+
+  if php -m 2>/dev/null | grep -qi ionCube; then
+    wget -N http://files.softaculous.com/install.sh
+    chmod 755 install.sh
+    ./install.sh
+    print_b "Softaculous installed successfully."
+  else
+    print_r "Error: ionCube is not installed on your server."
+  fi
+  pause_screen
+}
+
+install_sitepad() {
+  confirm_or_return "Are you sure ionCube is installed and active on your server? (y/n):" || return 0
+
+  if php -m 2>/dev/null | grep -qi ionCube; then
+    cd /usr/local/src || return 1
+    rm -f install.sh
+    wget -N https://files.sitepad.com/install.sh
+    chmod +x install.sh
+    ./install.sh
+    print_b "SitePad installed successfully."
+  else
+    print_r "Error: ionCube is not installed on your server."
+  fi
+  pause_screen
+}
+
+cpanel_plugins_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Plugins}\033[0m"
+    print_g "1) Install LiteSpeed"
+    print_g "2) Install ImunifyAV"
+    print_g "3) Install SSL"
+    print_g "4) Install WHMReseller"
+    print_g "5) Install WP Toolkit"
+    print_g "6) Install PostgreSQL"
+    print_g "7) Install Softaculous"
+    print_g "8) Install SitePad"
+    print_g "9) Back to Menu"
+    validate_menu_input "Enter your choice (1-9): " 1 9
+
+    case "$INPUT" in
+      1) clear_screen; install_litespeed_cpanel ;;
+      2) clear_screen; install_imunifyav ;;
+      3) clear_screen; install_ssl_cpanel ;;
+      4) clear_screen; install_whmreseller ;;
+      5) clear_screen; install_wp_toolkit_cpanel ;;
+      6) clear_screen; install_postgresql_cpanel ;;
+      7) clear_screen; install_softaculous ;;
+      8) clear_screen; install_sitepad ;;
+      9) clear_screen; break ;;
+    esac
+  done
+}
+
+# -----------------------------
+# CloudLinux
+# -----------------------------
+install_cloudlinux() {
+  confirm_or_return "Are you sure you want to install CloudLinux? (y/n):" || return 0
+
+  if is_centos_family; then
+    wget https://repo.cloudlinux.com/cloudlinux/sources/cln/cldeploy -O cldeploy.sh
+    print_g "Get a 30-day CloudLinux License: https://www.cloudlinux.com/trial"
+    validate_yn_input "Do you use the free 30-day license? (y/n):"
+    if is_yes "$INPUT"; then
+      local license
+      safe_read license "Enter your License: "
+      sh cldeploy.sh -k "$license"
+      print_b "CloudLinux installed successfully. Please reboot your system."
+    else
+      print_g "Use your own installation and activation command."
+    fi
+  else
+    print_r "CloudLinux installation is only supported on CentOS-like systems."
+  fi
+  pause_screen
+}
+
+install_cagefs() {
+  confirm_or_return "Are you sure you want to install CageFS? (y/n):" || return 0
+  if is_cloudlinux; then
+    case "$PKG_MANAGER" in
+      yum) yum install cagefs -y ;;
+      dnf) dnf install cagefs -y ;;
+      *) print_r "Unsupported package manager."; pause_screen; return 1 ;;
+    esac
+    /usr/sbin/cagefsctl --init
+    /usr/sbin/cagefsctl --enable-all
+    print_b "CageFS installed successfully."
+  else
+    print_r "CageFS installation is only supported on CloudLinux."
+  fi
+  pause_screen
+}
+
+install_alt_php() {
+  confirm_or_return "Are you sure you want to install alt-php? (y/n):" || return 0
+  if is_cloudlinux; then
+    case "$PKG_MANAGER" in
+      yum) yum groupinstall alt-php -y; yum update cagefs lvemanager -y; yum groupupdate alt-php -y ;;
+      dnf) dnf groupinstall alt-php -y; dnf update cagefs lvemanager -y; dnf groupupdate alt-php -y ;;
+      *) print_r "Unsupported package manager."; pause_screen; return 1 ;;
+    esac
+    print_b "alt-php installed successfully."
+  else
+    print_r "alt-php installation is only supported on CloudLinux."
+  fi
+  pause_screen
+}
+
+install_ea_php() {
+  confirm_or_return "Are you sure you want to install ea-php? (y/n):" || return 0
+  if is_cloudlinux; then
+    local php_versions=(ea-php82 ea-php81 ea-php80 ea-php74 ea-php73 ea-php72 ea-php71 ea-php70 ea-php56 ea-php55 ea-php54 ea-php53 ea-php52 ea-php51)
+    local php
+    for php in "${php_versions[@]}"; do
+      case "$PKG_MANAGER" in
+        yum) yum install -y "$php" ;;
+        dnf) dnf install -y "$php" ;;
+      esac
     done
+    case "$PKG_MANAGER" in
+      yum) yum update -y cagefs lvemanager ;;
+      dnf) dnf update -y cagefs lvemanager ;;
+    esac
+    print_b "ea-php installed successfully."
+  else
+    print_r "ea-php installation is only supported on CloudLinux."
   fi
+  pause_screen
+}
 
-  # sub-menu for Plesk
-  if [ $CP_CHOICE -eq 2 ]; then
-    clear
-    while true; do
-      echo -e "\033[0;32m${Plesk}\033[0m"
-      print_y "What do you want to do?"
-      print_g "1) Install Plesk"
-      print_g "2) Server Tools [4]"
-      print_g "3) Setup CSF [4]"
-      print_g "4) install Plugins [4]"
-      print_g "5) Advanced Tools [4]"
-      print_g "6) Back to Menu"
-      validate_menu_input "$(print_y 'Enter your choice (1-6) : ')" 1 6
-      PK_ACTION=$INPUT
-
-      if [ $PK_ACTION -eq 6 ]; then
-        clear
-        break
-      fi
-
-        # Install Plesk
-      if [ $PK_ACTION -eq 1 ]; then
-        clear
-        echo -e "\033[0;32m${InstallPlesk}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Install Plesk?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          sh <(curl https://autoinstall.plesk.com/one-click-installer || wget -O - https://autoinstall.plesk.com/one-click-installer)
-        fi
-      fi
-
-        # Server Tools
-      if [ $PK_ACTION -eq 2 ]; then
-        clear
-        echo -e "\033[0;32m${Tools}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Server Tools?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Change Nameserver"
-            print_g "2) Change Hostname"
-            print_g "3) Change SSH Port"
-            print_g "4) Change Password (root)"
-            print_g "5) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-5) : ')" 1 5
-            ST_ACTION=$INPUT
-
-              # Change Nameserver
-            if [ $ST_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to change the Nameserver?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -p "Enter Primary Nameserver: " PRIMARY_NS
-                read -p "Enter Secondary Nameserver: " SECONDARY_NS
-                if [ -f /etc/resolv.conf ]; then
-                  sed -i 's/^nameserver/#nameserver/g' /etc/resolv.conf
-                  echo "nameserver $PRIMARY_NS" >> /etc/resolv.conf
-                  echo "nameserver $SECONDARY_NS" >> /etc/resolv.conf
-                  print_b "Nameserver Changed To -> [ "$PRIMARY_NS" - "$SECONDARY_NS" ]"
-                fi
-              fi
-            fi
-
-              # Change hostname
-            if [ $ST_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to change the Hostname?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -rp "Enter your Hostname : " HOSTNAME
-                hostnamectl set-hostname $HOSTNAME
-                print_b "Hostname Changed To -> "$HOSTNAME""
-              fi
-            fi
-
-              # Change SSH Port
-            if [ $ST_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change SSH Port?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -rp "Enter new SSH port : " NEW_PORT
-                sudo sed -i "s/^#*Port 22/Port $NEW_PORT/" /etc/ssh/sshd_config
-                service sshd restart
-                print_b "SSH Port Changed To -> "$NEW_PORT""
-              fi
-            fi
-
-              # Change Password (root)
-            if [ $ST_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change Password Server?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ $(whoami) = "root" ]; then
-                  passwd root
-                else
-                  sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && sudo systemctl restart ssh && sudo passwd
-                fi
-                print_b "Password Changed (root) Successfully"
-              fi
-            fi
-            if [ $ST_ACTION -eq 5 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
-
-        # Setup CSF
-      if [ $PK_ACTION -eq 3 ]; then
-        clear
-        echo -e "\033[0;32m${CSF}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup CSF?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Install CSF"
-            print_g "2) CSF Configuration"
-            print_g "3) CSF Blocklists Configuration"
-            print_g "4) Unblock Telegram IPs"
-            print_g "5) Uninstall CSF"
-            print_g "6) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-6) : ')" 1 6
-            CSF_ACTION=$INPUT
-
-              # Install CSF
-            if [ $CSF_ACTION -eq 1 ]; then
-              clear
-              validate_yn_input "$(print_y 'Are you sure you want to Install CSF?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                cd /usr/src ; rm -fv csf.tgz ; wget https://download.configserver.com/csf.tgz ; tar -xzf csf.tgz ; cd csf ; sh install.sh ; perl /usr/local/csf/bin/csftest.pl ; cd
-                print_g "ConfigServer Security & Firewall (CSF) Successfully Installed"
-              fi
-            fi
-
-              #CSF Configuration
-            if [ $CSF_ACTION -eq 2 ]; then
-              clear
-              validate_yn_input "$(print_y 'Are you sure you want to Configuration CSF?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                # Set the parameters
-                TESTING="0"
-                CT_LIMIT="100"
-                CT_INTERVAL="30"
-                CT_EMAIL_ALERT="1"
-                CT_PORTS="80,443,2083,2082,2087,20,21,25,110,113,123,465,993,995,22"
-                CT_BLOCK_TIME="3600"
-                CT_PERMANENT="1"
-                CONNLIMIT="22;5,443;20,80;20,20;20,21;20,25;20,110;20,113;20,123;20,465;20,993;20,995;20,2083;20,2082;20"
-                RESTRICT_SYSLOG="3"
-                DENY_IP_LIMIT="200"
-                PACKET_FILTER="1"
-                PORTFLOOD="1"
-                # Update the csf.conf file
-                sed -i "s/^TESTING=.*/TESTING=$TESTING/g" /etc/csf/csf.conf
-                sed -i "s/^CT_LIMIT=.*/CT_LIMIT=$CT_LIMIT/g" /etc/csf/csf.conf
-                sed -i "s/^CT_INTERVAL=.*/CT_INTERVAL=$CT_INTERVAL/g" /etc/csf/csf.conf
-                sed -i "s/^CT_EMAIL_ALERT=.*/CT_EMAIL_ALERT=$CT_EMAIL_ALERT/g" /etc/csf/csf.conf
-                sed -i "s/^CT_PORTS=.*/CT_PORTS=$CT_PORTS/g" /etc/csf/csf.conf
-                sed -i "s/^CT_BLOCK_TIME=.*/CT_BLOCK_TIME=$CT_BLOCK_TIME/g" /etc/csf/csf.conf
-                sed -i "s/^CT_PERMANENT=.*/CT_PERMANENT=$CT_PERMANENT/g" /etc/csf/csf.conf
-                sed -i "s/^CONNLIMIT=.*/CONNLIMIT=$CONNLIMIT/g" /etc/csf/csf.conf
-                sed -i "s/^RESTRICT_SYSLOG=.*/RESTRICT_SYSLOG=$RESTRICT_SYSLOG/g" /etc/csf/csf.conf
-                sed -i "s/^DENY_IP_LIMIT=.*/DENY_IP_LIMIT=$DENY_IP_LIMIT/g" /etc/csf/csf.conf
-                sed -i "s/^PACKET_FILTER=.*/PACKET_FILTER=$PACKET_FILTER/g" /etc/csf/csf.conf
-                sed -i "s/^PORTFLOOD=.*/PORTFLOOD=$PORTFLOOD/g" /etc/csf/csf.conf
-                print_b "CSF configuration is successfully."
-              fi
-            fi
-
-              # CSF Blocklists Configuration
-            if [ $CSF_ACTION -eq 3 ]; then
-              clear
-              validate_yn_input "$(print_y 'Are you sure you want to CSF Blocklists Configuration?(y/n) :')"
-                if [ $INPUT = "y" ]; then
-                  while read line; do
-                    # Check if the line starts with #
-                    if [[ $line == \#* ]]; then
-                      # Skip comment lines
-                      continue
-                    fi
-                    # Split the line by | character
-                    IFS='|' read -ra arr <<< "$line"
-                  done < /etc/csf/csf.blocklists | sed 's/# Split the line by | character//'
-                  print_b "CSF Blocklists Configuration is Successfully."
-                fi
-            fi
-
-              # Unblock Telegram IPs
-            if [ $CSF_ACTION -eq 4 ]; then
-              clear
-              validate_yn_input "$(print_y 'Are you sure you want to Unblock Telegram IPs?(y/n) :')"
-                if [ $INPUT = "y" ]; then
-                  csf -a 149.154.168.0/22 ; csf -a 149.154.164.0/22 ; csf -a 149.154.172.0/22 ; csf -a 149.154.160.0/22 ; csf -a 91.108.4.0/22 ; csf -a 91.108.56.0/22 ; csf -a 91.108.16.0/22 ; csf -a 91.108.12.0/22 ; csf -a 91.108.8.0/22
-                  print_b "Unblock Telegram IPs is Successfully."
-                fi
-            fi
-
-              # uninstall CSF
-            if [ $CSF_ACTION -eq 5 ]; then
-              clear
-              validate_yn_input "$(print_y 'Are you sure you want to Uninstall CSF?(y/n) :')"
-                if [ $INPUT = "y" ]; then
-                  cd /etc/csf ; sh uninstall.sh
-                  print_b "Uninstall CSF is Successfully."
-                fi
-            fi
-            if [ $CSF_ACTION -eq 6 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
-
-        # Install Plugins
-      if [ $PK_ACTION -eq 4 ]; then
-        clear
-        echo -e "\033[0;32m${Plugins}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Install Plugins?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Install LiteSpeed"
-            print_g "2) Install ImunifyAV"
-            print_g "3) Install Softaculous"
-            print_g "4) Install SitePad"
-            print_g "5) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-5) : ')" 1 5
-            PG_ACTION=$INPUT
-
-              # Install LiteSpeed
-            if [ $PG_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install LiteSpeed?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                cd /usr/src ; wget http://www.litespeedtech.com/packages/plesk/litespeed-plesk.zip ; unzip litespeed-plesk.zip ; cd plib/resources ; chmod 700 pleskInstall.sh ; ./pleskInstall.sh ; rm -f pleskInstall.sh ; cd
-                print_b "LiteSpeed Successfully Installed"
-              fi
-            fi
-
-              # Install ImunifyAV
-            if [ $PG_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Install ImunifyAV?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                wget https://repo.imunify360.cloudlinux.com/defence360/imav-deploy.sh ; bash imav-deploy.sh ; rm -rf /root/imav-deploy.sh
-                print_b "ImunifyAV Successfully Installed"
-              fi
-            fi
-
-              # Install Softaculous
-            if [ $PG_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure that ioncube is installed and active on your server?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if php -m | grep -q ionCube ; then
-                  wget -N http://files.softaculous.com/install.sh && chmod 755 install.sh && ./install.sh
-                  print_b "Softaculous Successfully Installed"
-                else
-                  print_r "Error: ionCube is not installed on your server.
-                  Please go to this address to install and activate ionCube -> Home / Server Configuration / Tweak Settings -> PHP -> cPanel PHP loader"
-                fi
-              fi
-            fi
-
-              # Install SitePad
-            if [ $PG_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure that ioncube is installed and active on your server?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if php -m | grep -q ionCube ; then
-                  cd /usr/local/src/ ; rm -fv install.sh ; wget -N https://files.sitepad.com/install.sh ; chmod +x install.sh ; ./install.sh ; cd
-                  print_b "SitePad Successfully Installed"
-                else
-                  print_r "Error: ionCube is not installed on your server.
-                  Please go to this address to install and activate ionCube -> Tools & Settings > General Settings > PHP Settings > PHP 8.1 > Manage PECL Packages"
-                fi
-              fi
-            fi
-            if [ $PG_ACTION -eq 5 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
-
-        # Advanced Tools
-      if [ $PK_ACTION -eq 5 ]; then
-        clear
-        echo -e "\033[0;32m${Advanced}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Advanced Tools?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Clear RAM Cache"
-            print_g "2) Delete all error_log"
-            print_g "3) Clear /tmp"
-            print_g "4) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-            AT_ACTION=$INPUT
-
-              # Clear RAM Cache
-            if [ $AT_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Clear RAM Cache?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                sync; echo 1 > /proc/sys/vm/drop_caches ; sync; echo 2 > /proc/sys/vm/drop_caches ; sync; echo 3 > /proc/sys/vm/drop_caches ; swapoff -a ; swapon -a
-                print_b "RAM Cache Successfully Cleared"
-              fi
-            fi
-
-              # Delete all error_log
-            if [ $AT_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Clear RAM Cache?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                /usr/bin/find /root*/* -type f -name error_log -exec du -sh {} \;
-                /usr/bin/find /root*/* -type f -name error_log -exec rm -rf {} \;
-                /usr/bin/find /var*/*www/* -type f -name error_log -exec du -sh {} \;
-                /usr/bin/find /var*/*www/* -type f -name error_log -exec rm -rf {} \;
-                /usr/bin/find /var*/www/*vhosts/*/* -type f -name error_log -exec du -sh {} \;
-                /usr/bin/find /var*/www/*vhosts/*/* -type f -name error_log -exec rm -rf {} \;
-                /usr/bin/find /home*/* -type f -name error_log -exec du -sh {} \;
-                /usr/bin/find /home*/* -type f -name error_log -exec rm -rf {} \;
-                print_b "All error_log Successfully Delete"
-              fi
-            fi
-
-              # Clear /tmp
-            if [ $AT_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Clear /tmp?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [[ $(cat /etc/os-release | grep -w "ID") == *"centos"* ]]; then
-                  yum install tmpwatch -y ; /usr/sbin/tmpwatch --mtime --all 6 /tmp
-                  print_b "/tmp Successfully Cleared"
-                elif [[ $(cat /etc/os-release | grep -w "ID") == *"ubuntu"* ]]; then
-                  apt install tmpreaper -y ; /usr/sbin/tmpwatch --mtime --all 6 /tmp
-                  print_b "/tmp Successfully Cleared"
-                fi
-              fi
-            fi
-            if [ $AT_ACTION -eq 4 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
-    done
+install_mod_lsapi() {
+  confirm_or_return "Are you sure you want to install mod-lsapi? (y/n):" || return 0
+  if is_cloudlinux; then
+    case "$PKG_MANAGER" in
+      yum)
+        yum install -y liblsapi liblsapi-devel ea-apache24-mod_lsapi
+        ;;
+      dnf)
+        dnf install -y liblsapi liblsapi-devel ea-apache24-mod_lsapi
+        ;;
+    esac
+    /usr/bin/switch_mod_lsapi --setup
+    service_action "$APACHE_SERVICE" restart
+    print_b "mod-lsapi installed successfully."
+  else
+    print_r "mod-lsapi installation is only supported on CloudLinux."
   fi
+  pause_screen
+}
 
-  # sub-menu for aaPanel
-  if [ $CP_CHOICE -eq 3 ]; then
-    clear
-    while true; do
-      echo -e "\033[0;32m${aaPanel}\033[0m"
-      print_y "What do you want to do?"
-      print_g "1) Install aaPanel"
-      print_g "2) Server Tools [4]"
-      print_g "3) Setup Management [10]"
-      print_g "4) Setup WebServer [2]"
-      print_g "5) Setup Mysql [10]"
-      print_g "6) Setup FTP [7]"
-      print_g "7) Setup Redis [7]"
-      print_g "8) Setup Memcached [5]"
-      print_g "9) Back to Menu"
-      validate_menu_input "$(print_y 'Enter your choice (1-9) : ')" 1 9
-      AP_ACTION=$INPUT
+install_cloudlinux_python() {
+  confirm_or_return "Are you sure you want to install Python? (y/n):" || return 0
+  if is_cloudlinux; then
+    case "$PKG_MANAGER" in
+      yum)
+        yum -y groupinstall "Development Tools"
+        yum -y install openssl-devel bzip2-devel libffi-devel
+        yum groupinstall alt-python -y
+        yum install -y lvemanager lve-utils alt-python-virtualenv alt-mod-passenger alt-python27-devel
+        ;;
+      dnf)
+        dnf -y groupinstall "Development Tools"
+        dnf -y install openssl-devel bzip2-devel libffi-devel
+        dnf groupinstall alt-python -y
+        dnf install -y lvemanager lve-utils alt-python-virtualenv alt-mod-passenger alt-python27-devel
+        ;;
+    esac
+    print_b "Python installed successfully."
+  else
+    print_r "Python installation is only supported on CloudLinux."
+  fi
+  pause_screen
+}
 
-      if [ $AP_ACTION -eq 9 ]; then
-        clear
+install_cloudlinux_ruby() {
+  confirm_or_return "Are you sure you want to install Ruby? (y/n):" || return 0
+  if is_cloudlinux; then
+    case "$PKG_MANAGER" in
+      yum)
+        yum groupinstall alt-ruby -y
+        yum install -y lvemanager alt-python-virtualenv ea-ruby24-mod_passenger
+        ;;
+      dnf)
+        dnf groupinstall alt-ruby -y
+        dnf install -y lvemanager alt-python-virtualenv ea-ruby24-mod_passenger
+        ;;
+    esac
+    print_b "Ruby installed successfully."
+  else
+    print_r "Ruby installation is only supported on CloudLinux."
+  fi
+  pause_screen
+}
+
+install_cloudlinux_nodejs() {
+  confirm_or_return "Are you sure you want to install NodeJS? (y/n):" || return 0
+  if is_cloudlinux; then
+    case "$PKG_MANAGER" in
+      yum)
+        yum groupinstall alt-nodejs -y
+        yum install -y lvemanager lve-utils alt-mod-passenger
+        ;;
+      dnf)
+        dnf groupinstall alt-nodejs -y
+        dnf install -y lvemanager lve-utils alt-mod-passenger
+        ;;
+    esac
+    print_b "NodeJS installed successfully."
+  else
+    print_r "NodeJS installation is only supported on CloudLinux."
+  fi
+  pause_screen
+}
+
+install_mysql_governor() {
+  confirm_or_return "Are you sure you want to install MySQL Governor? (y/n):" || return 0
+  if is_cloudlinux; then
+    case "$PKG_MANAGER" in
+      yum)
+        yum remove -y db-governor db-governor-mysql || true
+        yum install -y governor-mysql
+        ;;
+      dnf)
+        dnf remove -y db-governor db-governor-mysql || true
+        dnf install -y governor-mysql
+        ;;
+    esac
+    local mysql_version
+    safe_read mysql_version "Enter MySQL Version: "
+    /usr/share/lve/dbgovernor/mysqlgovernor.py --mysql-version="$mysql_version"
+    /usr/share/lve/dbgovernor/mysqlgovernor.py --install --yes
+    /usr/share/lve/dbgovernor/mysqlgovernor.py --dbupdate
+    service_action db_governor restart
+    service_action db_governor start
+    print_b "MySQL Governor installed successfully."
+  else
+    print_r "MySQL Governor installation is only supported on CloudLinux."
+  fi
+  pause_screen
+}
+
+cloudlinux_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${CloudLinux}\033[0m"
+    print_g "1) Install CloudLinux"
+    print_g "2) Install CageFS"
+    print_g "3) Install alt-php"
+    print_g "4) Install ea-php"
+    print_g "5) Install mod-lsapi"
+    print_g "6) Install Python"
+    print_g "7) Install Ruby"
+    print_g "8) Install NodeJS"
+    print_g "9) Install MySQL Governor (not recommended)"
+    print_g "10) Back to Menu"
+    validate_menu_input "Enter your choice (1-10): " 1 10
+
+    case "$INPUT" in
+      1) clear_screen; install_cloudlinux ;;
+      2) clear_screen; install_cagefs ;;
+      3) clear_screen; install_alt_php ;;
+      4) clear_screen; install_ea_php ;;
+      5) clear_screen; install_mod_lsapi ;;
+      6) clear_screen; install_cloudlinux_python ;;
+      7) clear_screen; install_cloudlinux_ruby ;;
+      8) clear_screen; install_cloudlinux_nodejs ;;
+      9) clear_screen; install_mysql_governor ;;
+      10) clear_screen; break ;;
+    esac
+  done
+}
+
+# -----------------------------
+# cPanel FTP
+# -----------------------------
+cpanel_ftp_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${FTP}\033[0m"
+    print_g "1) Pure-FTPd FTP Server (recommended)"
+    print_g "2) ProFTP FTP Server"
+    print_g "3) Disable FTP Services"
+    print_g "4) Back to Menu"
+    validate_menu_input "Enter your choice (1-4): " 1 4
+
+    case "$INPUT" in
+      1)
+        /usr/local/cpanel/scripts/setupftpserver pure-ftpd
+        print_b "Pure-FTPd configured successfully."
+        pause_screen
+        ;;
+      2)
+        /usr/local/cpanel/scripts/setupftpserver proftpd
+        print_b "ProFTP configured successfully."
+        pause_screen
+        ;;
+      3)
+        /usr/local/cpanel/scripts/setupftpserver disabled
+        print_b "FTP services disabled successfully."
+        pause_screen
+        ;;
+      4)
+        clear_screen
         break
-      fi
+        ;;
+    esac
+  done
+}
 
-        # Install aaPanel
-      if [ $AP_ACTION -eq 1 ]; then
-        clear
-        echo -e "\033[0;32m${InstallaaPanel}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Install aaPanel?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          if [[ $(cat /etc/os-release | grep -w "ID") == *"centos"* ]]; then
-            yum install -y wget && wget -O install.sh http://www.aapanel.com/script/install_6.0_en.sh && bash install.sh aapanel
-            print_g "aaPanel Successfully Installed, Please Login Panel"
-          elif [[ $(cat /etc/os-release | grep -w "ID") == *"ubuntu"* ]]; then
-            wget -O install.sh http://www.aapanel.com/script/install-ubuntu_6.0_en.sh && sudo bash install.sh aapanel
-            print_g "aaPanel Successfully Installed, Please Login Panel"
-          elif [[ $(cat /etc/os-release | grep -w "ID") == *"debian"* ]]; then
-            wget -O install.sh http://www.aapanel.com/script/install-ubuntu_6.0_en.sh && bash install.sh aapanel
-            print_g "aaPanel Successfully Installed, Please Login Panel"
-          else
-            print_r "aaPanel installation is only supported on CentOS, Ubuntu, Debian."
+# -----------------------------
+# Advanced Tools
+# -----------------------------
+restore_backup_cpanel() {
+  confirm_or_return "Are you sure you want to restore the user backup? (y/n):" || return 0
+
+  local directory backup_link backup_file_name
+  safe_read directory "Enter the home directory location (default /home): "
+  [[ -n "$directory" ]] || directory="/home"
+
+  cd "$directory" || { print_r "Cannot access $directory"; pause_screen; return 1; }
+  safe_read backup_link "Enter backup link: "
+  print_g "Downloading the backup file..."
+  wget "$backup_link"
+  safe_read backup_file_name "Enter backup file name: "
+  print_g "Restoring the backup file..."
+  /usr/local/cpanel/scripts/restorepkg "$backup_file_name"
+  pause_screen
+}
+
+clear_ram_cache() {
+  confirm_or_return "Are you sure you want to clear RAM cache? (y/n):" || return 0
+  sync
+  echo 1 > /proc/sys/vm/drop_caches
+  sync
+  echo 2 > /proc/sys/vm/drop_caches
+  sync
+  echo 3 > /proc/sys/vm/drop_caches
+  swapoff -a && swapon -a
+  print_b "RAM cache cleared successfully."
+  pause_screen
+}
+
+delete_error_logs_cpanel() {
+  confirm_or_return "Are you sure you want to delete all error_log files? (y/n):" || return 0
+  find /root -type f -name error_log -exec du -sh {} \; -exec rm -f {} \; 2>/dev/null
+  find /home -type f -name error_log -exec du -sh {} \; -exec rm -f {} \; 2>/dev/null
+  print_b "All error_log files deleted successfully."
+  pause_screen
+}
+
+clear_tmp_dir() {
+  confirm_or_return "Are you sure you want to clear /tmp? (y/n):" || return 0
+
+  if is_centos_family; then
+    case "$PKG_MANAGER" in
+      yum) yum install -y tmpwatch ;;
+      dnf) dnf install -y tmpwatch ;;
+    esac
+    /usr/sbin/tmpwatch --mtime --all 6 /tmp
+    print_b "/tmp cleared successfully."
+  elif is_ubuntu_family; then
+    apt install -y tmpreaper
+    tmpreaper 6h /tmp
+    print_b "/tmp cleared successfully."
+  else
+    print_r "Unsupported OS for /tmp cleanup."
+  fi
+  pause_screen
+}
+
+advanced_tools_menu_cpanel() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Advanced}\033[0m"
+    print_g "1) Restore Backup"
+    print_g "2) Clear RAM Cache"
+    print_g "3) Delete all error_log"
+    print_g "4) Clear /tmp"
+    print_g "5) Back to Menu"
+    validate_menu_input "Enter your choice (1-5): " 1 5
+
+    case "$INPUT" in
+      1) clear_screen; restore_backup_cpanel ;;
+      2) clear_screen; clear_ram_cache ;;
+      3) clear_screen; delete_error_logs_cpanel ;;
+      4) clear_screen; clear_tmp_dir ;;
+      5) clear_screen; break ;;
+    esac
+  done
+}
+
+advanced_tools_menu_plesk() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Advanced}\033[0m"
+    print_g "1) Clear RAM Cache"
+    print_g "2) Delete all error_log"
+    print_g "3) Clear /tmp"
+    print_g "4) Back to Menu"
+    validate_menu_input "Enter your choice (1-4): " 1 4
+
+    case "$INPUT" in
+      1) clear_screen; clear_ram_cache ;;
+      2)
+        clear_screen
+        confirm_or_return "Are you sure you want to delete all error_log files? (y/n):" || continue
+        find /root -type f -name error_log -exec du -sh {} \; -exec rm -f {} \; 2>/dev/null
+        find /var -type f -name error_log -exec du -sh {} \; -exec rm -f {} \; 2>/dev/null
+        find /home -type f -name error_log -exec du -sh {} \; -exec rm -f {} \; 2>/dev/null
+        print_b "All error_log files deleted successfully."
+        pause_screen
+        ;;
+      3) clear_screen; clear_tmp_dir ;;
+      4) clear_screen; break ;;
+    esac
+  done
+}
+
+# -----------------------------
+# cPanel Main
+# -----------------------------
+install_cpanel() {
+  confirm_or_return "Are you sure you want to install cPanel? (y/n):" || return 0
+  cd /home || return 1
+  curl -o latest -L https://securedownloads.cpanel.net/latest
+  sh latest
+}
+
+cpanel_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${cPanel}\033[0m"
+    print_y "What do you want to do?"
+    print_g "1) Install cPanel"
+    print_g "2) Server Tools [4]"
+    print_g "3) Setup CSF [5]"
+    print_g "4) Install Plugins [8]"
+    print_g "5) Setup CloudLinux [9]"
+    print_g "6) Setup FTP Server [3]"
+    print_g "7) Advanced Tools [4]"
+    print_g "8) Back to Menu"
+    validate_menu_input "Enter your choice (1-8): " 1 8
+
+    case "$INPUT" in
+      1) clear_screen; echo -e "\033[0;32m${InstallcPanel}\033[0m"; install_cpanel ;;
+      2) clear_screen; server_tools_menu ;;
+      3) clear_screen; csf_menu ;;
+      4) clear_screen; cpanel_plugins_menu ;;
+      5) clear_screen; cloudlinux_menu ;;
+      6) clear_screen; cpanel_ftp_menu ;;
+      7) clear_screen; advanced_tools_menu_cpanel ;;
+      8) clear_screen; break ;;
+    esac
+  done
+}
+
+# -----------------------------
+# Plesk
+# -----------------------------
+install_plesk() {
+  confirm_or_return "Are you sure you want to install Plesk? (y/n):" || return 0
+  sh <(curl -fsSL https://autoinstall.plesk.com/one-click-installer || wget -qO- https://autoinstall.plesk.com/one-click-installer)
+}
+
+install_litespeed_plesk() {
+  confirm_or_return "Are you sure you want to install LiteSpeed? (y/n):" || return 0
+  cd /usr/src || return 1
+  wget http://www.litespeedtech.com/packages/plesk/litespeed-plesk.zip
+  unzip -o litespeed-plesk.zip
+  cd plib/resources || return 1
+  chmod 700 pleskInstall.sh
+  ./pleskInstall.sh
+  rm -f pleskInstall.sh
+  print_b "LiteSpeed installed successfully."
+  pause_screen
+}
+
+plesk_plugins_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Plugins}\033[0m"
+    print_g "1) Install LiteSpeed"
+    print_g "2) Install ImunifyAV"
+    print_g "3) Install Softaculous"
+    print_g "4) Install SitePad"
+    print_g "5) Back to Menu"
+    validate_menu_input "Enter your choice (1-5): " 1 5
+
+    case "$INPUT" in
+      1) clear_screen; install_litespeed_plesk ;;
+      2) clear_screen; install_imunifyav ;;
+      3) clear_screen; install_softaculous ;;
+      4) clear_screen; install_sitepad ;;
+      5) clear_screen; break ;;
+    esac
+  done
+}
+
+plesk_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Plesk}\033[0m"
+    print_y "What do you want to do?"
+    print_g "1) Install Plesk"
+    print_g "2) Server Tools [4]"
+    print_g "3) Setup CSF [5]"
+    print_g "4) Install Plugins [4]"
+    print_g "5) Advanced Tools [3]"
+    print_g "6) Back to Menu"
+    validate_menu_input "Enter your choice (1-6): " 1 6
+
+    case "$INPUT" in
+      1) clear_screen; echo -e "\033[0;32m${InstallPlesk}\033[0m"; install_plesk ;;
+      2) clear_screen; server_tools_menu ;;
+      3) clear_screen; csf_menu ;;
+      4) clear_screen; plesk_plugins_menu ;;
+      5) clear_screen; advanced_tools_menu_plesk ;;
+      6) clear_screen; break ;;
+    esac
+  done
+}
+
+# -----------------------------
+# aaPanel helpers
+# -----------------------------
+aa_panel_service_menu() {
+  local service_name="$1"
+  local label="$2"
+  local config_path="$3"
+  local dir_path="$4"
+  local service_exists_mode="$5"
+
+  while true; do
+    clear_screen
+    print_y "Manage $label"
+    print_g "1) Start $label"
+    print_g "2) Stop $label"
+    print_g "3) Restart $label"
+    print_g "4) Reload $label"
+    print_g "5) Status $label"
+    print_g "6) Configuration $label"
+    print_g "7) Open Directory $label"
+    print_g "8) Back to Menu"
+    validate_menu_input "Enter your choice (1-8): " 1 8
+
+    case "$INPUT" in
+      1)
+        confirm_or_return "Are you sure you want to start $label? (y/n):" || continue
+        if aa_service_available "$service_exists_mode" "$service_name" "$dir_path"; then
+          service_action "$service_name" start
+          print_g "$label started successfully."
+        else
+          print_r "$label is not installed."
+        fi
+        pause_screen
+        ;;
+      2)
+        confirm_or_return "Are you sure you want to stop $label? (y/n):" || continue
+        if aa_service_available "$service_exists_mode" "$service_name" "$dir_path"; then
+          service_action "$service_name" stop
+          print_g "$label stopped successfully."
+        else
+          print_r "$label is not installed."
+        fi
+        pause_screen
+        ;;
+      3)
+        confirm_or_return "Are you sure you want to restart $label? (y/n):" || continue
+        if aa_service_available "$service_exists_mode" "$service_name" "$dir_path"; then
+          service_action "$service_name" restart
+          print_g "$label restarted successfully."
+        else
+          print_r "$label is not installed."
+        fi
+        pause_screen
+        ;;
+      4)
+        confirm_or_return "Are you sure you want to reload $label? (y/n):" || continue
+        if aa_service_available "$service_exists_mode" "$service_name" "$dir_path"; then
+          service_action "$service_name" reload
+          print_g "$label reloaded successfully."
+        else
+          print_r "$label is not installed."
+        fi
+        pause_screen
+        ;;
+      5)
+        confirm_or_return "Are you sure you want to view status of $label? (y/n):" || continue
+        if aa_service_available "$service_exists_mode" "$service_name" "$dir_path"; then
+          systemctl status "$service_name"
+        else
+          print_r "$label is not installed."
+        fi
+        pause_screen
+        ;;
+      6)
+        confirm_or_return "Are you sure you want to configure $label? (y/n):" || continue
+        if aa_service_available "$service_exists_mode" "$service_name" "$dir_path"; then
+          editor_menu "$config_path"
+        else
+          print_r "$label is not installed."
+          pause_screen
+        fi
+        ;;
+      7)
+        confirm_or_return "Are you sure you want to open directory of $label? (y/n):" || continue
+        if aa_service_available "$service_exists_mode" "$service_name" "$dir_path"; then
+          cd "$dir_path" || { print_r "Cannot open $dir_path"; pause_screen; continue; }
+          ls
+        else
+          print_r "$label is not installed."
+        fi
+        pause_screen
+        ;;
+      8)
+        break
+        ;;
+    esac
+  done
+}
+
+aa_service_available() {
+  local mode="$1"
+  local service_name="$2"
+  local dir_path="$3"
+
+  if [[ "$mode" == "command" ]]; then
+    command_exists "$service_name"
+  else
+    [[ -d "$dir_path" ]]
+  fi
+}
+
+editor_menu() {
+  local target_file="$1"
+  while true; do
+    clear_screen
+    print_g "1) nano editor"
+    print_g "2) vi editor"
+    print_g "3) vim editor"
+    print_g "4) Back to Menu"
+    validate_menu_input "Enter your choice (1-4): " 1 4
+
+    case "$INPUT" in
+      1) nano "$target_file" ;;
+      2) vi "$target_file" ;;
+      3) vim "$target_file" ;;
+      4) break ;;
+    esac
+  done
+}
+
+install_aapanel() {
+  confirm_or_return "Are you sure you want to install aaPanel? (y/n):" || return 0
+
+  if is_centos_family; then
+    case "$PKG_MANAGER" in
+      yum) yum install -y wget ;;
+      dnf) dnf install -y wget ;;
+    esac
+    wget -O install.sh http://www.aapanel.com/script/install_6.0_en.sh
+    bash install.sh aapanel
+    print_g "aaPanel installed successfully. Please login to panel."
+  elif [[ "$OS_ID" == "ubuntu" ]]; then
+    wget -O install.sh http://www.aapanel.com/script/install-ubuntu_6.0_en.sh
+    bash install.sh aapanel
+    print_g "aaPanel installed successfully. Please login to panel."
+  elif [[ "$OS_ID" == "debian" ]]; then
+    wget -O install.sh http://www.aapanel.com/script/install-ubuntu_6.0_en.sh
+    bash install.sh aapanel
+    print_g "aaPanel installed successfully. Please login to panel."
+  else
+    print_r "aaPanel installation is only supported on CentOS-like, Ubuntu, Debian."
+  fi
+  pause_screen
+}
+
+aa_management_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Management}\033[0m"
+    print_g "1) Start aaPanel"
+    print_g "2) Stop aaPanel"
+    print_g "3) Restart aaPanel"
+    print_g "4) Uninstall aaPanel"
+    print_g "5) Change Password aaPanel"
+    print_g "6) View Current Port"
+    print_g "7) Change Port aaPanel"
+    print_g "8) Turn off SSL aaPanel"
+    print_g "9) View Error logs aaPanel"
+    print_g "10) View Error logs Site"
+    print_g "11) Back to Menu"
+    validate_menu_input "Enter your choice (1-11): " 1 11
+
+    case "$INPUT" in
+      1)
+        confirm_or_return "Are you sure you want to start aaPanel? (y/n):" || continue
+        service_action bt start
+        print_g "aaPanel started successfully."
+        pause_screen
+        ;;
+      2)
+        confirm_or_return "Are you sure you want to stop aaPanel? (y/n):" || continue
+        service_action bt stop
+        print_g "aaPanel stopped successfully."
+        pause_screen
+        ;;
+      3)
+        confirm_or_return "Are you sure you want to restart aaPanel? (y/n):" || continue
+        service_action bt restart
+        print_g "aaPanel restarted successfully."
+        pause_screen
+        ;;
+      4)
+        confirm_or_return "Are you sure you want to uninstall aaPanel? (y/n):" || continue
+        service_action bt stop || true
+        chkconfig --del bt 2>/dev/null || true
+        rm -f /etc/init.d/bt
+        rm -rf /www/server/panel
+        print_g "aaPanel uninstalled successfully."
+        pause_screen
+        ;;
+      5)
+        confirm_or_return "Are you sure you want to change aaPanel password? (y/n):" || continue
+        local pass
+        safe_read pass "Enter Password: "
+        cd /www/server/panel || { print_r "aaPanel path not found."; pause_screen; continue; }
+        python tools.py panel "$pass"
+        print_b "Password changed successfully."
+        pause_screen
+        ;;
+      6)
+        confirm_or_return "Are you sure you want to view current port? (y/n):" || continue
+        cat /www/server/panel/data/port.pl
+        pause_screen
+        ;;
+      7)
+        confirm_or_return "Are you sure you want to change aaPanel port? (y/n):" || continue
+        local port
+        safe_read port "Enter aaPanel Port: "
+        if [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )); then
+          echo "$port" > /www/server/panel/data/port.pl
+          service_action bt restart
+          if command_exists firewall-cmd; then
+            firewall-cmd --permanent --zone=public --add-port="${port}/tcp"
+            firewall-cmd --reload
           fi
+          print_g "aaPanel port changed successfully to -> $port"
+        else
+          print_r "Invalid port."
         fi
-      fi
+        pause_screen
+        ;;
+      8)
+        confirm_or_return "Are you sure you want to turn off SSL for aaPanel? (y/n):" || continue
+        rm -f /www/server/panel/data/ssl.pl
+        /etc/init.d/bt restart 2>/dev/null || service_action bt restart
+        print_g "aaPanel SSL disabled successfully."
+        pause_screen
+        ;;
+      9)
+        confirm_or_return "Are you sure you want to view aaPanel error logs? (y/n):" || continue
+        cat /tmp/panelBoot 2>/dev/null || print_r "Log file not found."
+        pause_screen
+        ;;
+      10)
+        confirm_or_return "Are you sure you want to view site error logs? (y/n):" || continue
+        ls -lah /www/wwwlogs 2>/dev/null || print_r "Site logs directory not found."
+        pause_screen
+        ;;
+      11)
+        break
+        ;;
+    esac
+  done
+}
 
-        # Server Tools
-      if [ $AP_ACTION -eq 2 ]; then
-        clear
-        echo -e "\033[0;32m${Tools}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Server Tools?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Change Nameserver"
-            print_g "2) Change Hostname"
-            print_g "3) Change SSH Port"
-            print_g "4) Change Password (root)"
-            print_g "5) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-11) : ')" 1 5
-            ST_ACTION=$INPUT
+aa_webserver_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${WebServer}\033[0m"
+    print_y "Select your Web Server type"
+    print_g "1) Setup Nginx [7]"
+    print_g "2) Setup Apache [7]"
+    print_g "3) Back to Menu"
+    validate_menu_input "Enter your choice (1-3): " 1 3
 
-              # Change Nameserver
-            if [ $ST_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to change the Nameserver?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -p "Enter Primary Nameserver: " PRIMARY_NS
-                read -p "Enter Secondary Nameserver: " SECONDARY_NS
-                if [ -f /etc/resolv.conf ]; then
-                  sed -i 's/^nameserver/#nameserver/g' /etc/resolv.conf
-                  echo "nameserver $PRIMARY_NS" >> /etc/resolv.conf
-                  echo "nameserver $SECONDARY_NS" >> /etc/resolv.conf
-                  print_b "Nameserver Changed To -> [ "$PRIMARY_NS" - "$SECONDARY_NS" ]"
-                fi
-              fi
-            fi
+    case "$INPUT" in
+      1) aa_panel_service_menu nginx Nginx /www/server/nginx/conf/nginx.conf /www/server/nginx command ;;
+      2) aa_panel_service_menu "$APACHE_SERVICE" Apache /www/server/apache/conf/httpd.conf /www/server/httpd command ;;
+      3) break ;;
+    esac
+  done
+}
 
-              # Change hostname
-            if [ $ST_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to change the Hostname?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -rp "Enter your Hostname : " HOSTNAME
-                hostnamectl set-hostname $HOSTNAME
-                print_b "Hostname Changed To -> "$HOSTNAME""
-              fi
-            fi
+aa_mysql_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Mysql}\033[0m"
+    print_g "1) Start Mysql"
+    print_g "2) Stop Mysql"
+    print_g "3) Restart Mysql"
+    print_g "4) Reload Mysql"
+    print_g "5) Status Mysql"
+    print_g "6) Change Password MySQL"
+    print_g "7) Configuration Mysql"
+    print_g "8) Open Directory Mysql"
+    print_g "9) Open Directory phpMyAdmin"
+    print_g "10) Open Directory Data Storage"
+    print_g "11) Back to Menu"
+    validate_menu_input "Enter your choice (1-11): " 1 11
 
-              # Change SSH Port
-            if [ $ST_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change SSH Port?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -rp "Enter new SSH port : " NEW_PORT
-                sudo sed -i "s/^#*Port 22/Port $NEW_PORT/" /etc/ssh/sshd_config
-                service sshd restart
-                print_b "SSH Port Changed To -> "$NEW_PORT""
-              fi
-            fi
-
-              # Change Password (root)
-            if [ $ST_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change Password Server?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ $(whoami) = "root" ]; then
-                  passwd root
-                else
-                  sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && sudo systemctl restart ssh && sudo passwd
-                fi
-                print_b "Password Changed (root) Successfully"
-              fi
-            fi
-            if [ $ST_ACTION -eq 5 ]; then
-              clear
-              break
-            fi
-          done
+    case "$INPUT" in
+      1|2|3|4|5)
+        local action
+        case "$INPUT" in
+          1) action="start" ;;
+          2) action="stop" ;;
+          3) action="restart" ;;
+          4) action="reload" ;;
+          5) action="status" ;;
+        esac
+        confirm_or_return "Are you sure you want to ${action} MySQL? (y/n):" || continue
+        if command_exists mysql; then
+          if [[ "$action" == "status" ]]; then
+            systemctl status "$MYSQL_SERVICE"
+          else
+            service_action "$MYSQL_SERVICE" "$action"
+            print_g "Mysql ${action}ed successfully."
+          fi
+        else
+          print_r "Mysql is not installed."
         fi
-      fi
-
-        # Setup Management
-      if [ $AP_ACTION -eq 3 ]; then
-        clear
-        echo -e "\033[0;32m${Management}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup Management?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Start aaPanel"
-            print_g "2) Stop aaPanel"
-            print_g "3) Restart aaPanel"
-            print_g "4) Uninstall aaPanel"
-            print_g "5) Change Password aaPanel"
-            print_g "6) View Current Port"
-            print_g "7) Change Port aaPanel"
-            print_g "8) Turn off SSL aaPanel"
-            print_g "9) View Error logs aaPanel"
-            print_g "10) View Error logs Site"
-            print_g "11) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-11) : ')" 1 11
-            SM_ACTION=$INPUT
-
-              # Start aaPanel
-            if [ $SM_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Start aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                service bt start
-                print_g "aaPanel Successfully Started."
-              fi
-            fi
-
-              # Stop aaPanel
-            if [ $SM_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Stop aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                service bt stop
-                print_g "aaPanel Successfully Stoped."
-              fi
-            fi
-
-              # Restart aaPanel
-            if [ $SM_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Restart aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                service bt restart
-                print_g "aaPanel Successfully Restarted."
-              fi
-            fi
-
-              # Uninstall aaPanel
-            if [ $SM_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Uninstall aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                service bt stop ; chkconfig --del bt ; rm -f /etc/init.d/bt ; rm -rf /www/server/panel
-                print_g "aaPanel Successfully Uninstalled."
-              fi
-            fi
-
-              # Change Password aaPanel
-            if [ $SM_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change Password aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                  read -rp "Enter Password : " Pass
-                  cd /www/server/panel ; python tools.py panel $Pass
-                  print_b "Password Changed To -> "$Pass""
-              fi
-            fi
-
-              # View Current Port
-            if [ $SM_ACTION -eq 6 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to View Current Port?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                cat /www/server/panel/data/port.pl
-              fi
-            fi
-
-              # Change Port aaPanel
-            if [ $SM_ACTION -eq 7 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Uninstall aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                read -p "Enter Port aaPanel : " Port
-                echo $Port > /www/server/panel/data/port.pl ; service bt restart ; firewall-cmd --permanent --zone=public --add-port=$Port/tcp firewall-cmd --reload ; service bt stop ; chkconfig --del bt ; rm -f /etc/init.d/bt ; rm -rf /www/server/panel
-                print_g "aaPanel Successfully Changed Port To -> "$Port"."
-              fi
-            fi
-
-              # Turn off SSL aaPanel
-            if [ $SM_ACTION -eq 8 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Turn off SSL aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                rm -f /www/server/panel/data/ssl.pl ; /etc/init.d/bt restart
-                print_g "aaPanel SSL successfully disabled."
-              fi
-            fi
-
-              # View Error logs aaPanel
-            if [ $SM_ACTION -eq 9 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to View Error logs aaPanel?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                cat /tmp/panelBoot
-              fi
-            fi
-
-              # View Error logs Site
-            if [ $SM_ACTION -eq 10 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to View Error logs Site?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                cat /www/wwwlogs
-              fi
-            fi
-            if [ $SM_ACTION -eq 11 ]; then
-              clear
-              break
-            fi
-          done
+        pause_screen
+        ;;
+      6)
+        confirm_or_return "Are you sure you want to change MySQL password? (y/n):" || continue
+        if command_exists mysql; then
+          local pass
+          safe_read pass "Enter Password: "
+          cd /www/server/panel || { print_r "aaPanel path not found."; pause_screen; continue; }
+          python3 tools.py root "$pass"
+          print_b "Password changed successfully."
+        else
+          print_r "Mysql is not installed."
         fi
-      fi
-
-        # WebServer
-      if [ $AP_ACTION -eq 4 ]; then
-        clear
-        echo -e "\033[0;32m${WebServer}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to WebServer section?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_y "Select your Web Server type"
-            print_g "1) Setup Nginx [7]"
-            print_g "2) Setup Apache [7]"
-            print_g "3) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-3) : ')" 1 3
-            WS_ACTION=$INPUT
-
-              # Setup Nginx
-            if [ $WS_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Setup Nginx?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                while true; do
-                  print_g "1) Start Nginx"
-                  print_g "2) Stop Nginx"
-                  print_g "3) Restart Nginx"
-                  print_g "4) Reload Nginx"
-                  print_g "5) Status Nginx"         
-                  print_g "6) Configuration Nginx"
-                  print_g "7) Open Directory Nginx"
-                  print_g "8) Back to Menu"
-                  validate_menu_input "$(print_y 'Enter your choice (1-8) : ')" 1 8
-                  SN_ACTION=$INPUT
-                  
-                    # Start Nginx
-                  if [ $SN_ACTION -eq 1 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Start Nginx?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v nginx)" ]; then
-                        systemctl start nginx
-                        print_g "Nginx Successfully Started."
-                      else
-                        print_r "Nginx is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Stop Nginx
-                  if [ $SN_ACTION -eq 2 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Stop Nginx?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v nginx)" ]; then
-                        systemctl stop nginx
-                        print_g "Nginx Successfully Stoped."
-                      else
-                        print_r "Nginx is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Restart Nginx
-                  if [ $SN_ACTION -eq 3 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Restart Nginx?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v nginx)" ]; then
-                        systemctl restart nginx
-                        print_g "Nginx Successfully Restarted."
-                      else
-                        print_r "Nginx is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Reload Nginx
-                  if [ $SN_ACTION -eq 4 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Reload Nginx?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v nginx)" ]; then
-                        systemctl reload nginx
-                        print_g "Nginx Successfully Reloaded."
-                      else
-                        print_r "Nginx is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Status Nginx
-                  if [ $SN_ACTION -eq 5 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Srarus Nginx?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v nginx)" ]; then
-                        systemctl status nginx
-                      else
-                        print_r "Nginx is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Configuration Nginx
-                  if [ $SN_ACTION -eq 6 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Configuration Nginx?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v nginx)" ]; then
-                        while true; do
-                          print_y ""
-                          print_g "1) nano editor"
-                          print_g "2) vi editor"
-                          print_g "3) vim editor"
-                          print_g "4) Back to Menu"
-                          validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-                          CN_ACTION=$INPUT
-                          
-                            # nano editor
-                          if [ $CN_ACTION -eq 1 ]; then
-                          nano /www/server/nginx/conf/nginx.conf
-                          sleep 2s
-                          clear
-                          fi
-
-                            # vi editor
-                          if [ $CN_ACTION -eq 2 ]; then
-                          vi /www/server/nginx/conf/nginx.conf
-                          sleep 2s
-                          clear
-                          fi
-
-                            # vim editor
-                          if [ $CN_ACTION -eq 3 ]; then
-                          vim /www/server/nginx/conf/nginx.conf
-                          sleep 2s
-                          clear
-                          fi
-                          if [ $CN_ACTION -eq 4 ]; then
-                          vim /www/server/nginx/conf/nginx.conf
-                          sleep 2s
-                          clear
-                          fi
-                        done
-                      else
-                        print_r "Nginx is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Open Directory Nginx
-                  if [ $SN_ACTION -eq 7 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Open Directory Nginx?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v nginx)" ]; then
-                        cd /www/server/nginx ; ls
-                      else
-                        print_r "Nginx is not installed"
-                      fi
-                    fi
-                  fi
-                  if [ $SN_ACTION -eq 8 ]; then
-                    clear
-                    break
-                  fi
-                done
-              fi
-            fi
-
-              # Setup Apache
-            if [ $WS_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Setup Apache?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                while true; do
-                  print_g "1) Start Apache"
-                  print_g "2) Stop Apache"
-                  print_g "3) Restart Apache"
-                  print_g "4) Reload Apache"
-                  print_g "5) Status Apache"
-                  print_g "6) Configuration Apache"
-                  print_g "7) Open Directory Apache"
-                  print_g "8) Back to Menu"
-                  validate_menu_input "$(print_y 'Enter your choice (1-8) : ')" 1 8
-                  SP_ACTION=$INPUT
-                  
-                    # Start Apache
-                  if [ $SP_ACTION -eq 1 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Start Apache?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v apache2)" ]; then
-                        systemctl start apache2
-                        print_g "Apache Successfully Started."
-                      else
-                        print_r "Apache is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Stop Apache
-                  if [ $SP_ACTION -eq 2 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Stop Apache?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v apache2)" ]; then
-                        systemctl stop apache2
-                        print_g "Apache Successfully Stoped."
-                      else
-                        print_r "Apache is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Restart Apache
-                  if [ $SP_ACTION -eq 3 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Restart Apache?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v apache2)" ]; then
-                        systemctl restart apache2
-                        print_g "Apache Successfully Restarted."
-                      else
-                        print_r "Apache is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Reload Apache
-                  if [ $SP_ACTION -eq 4 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Reload Apache?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v apache2)" ]; then
-                        systemctl reload apache2
-                        print_g "Apache Successfully Reloaded."
-                      else
-                        print_r "Apache is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Status Apache
-                  if [ $SP_ACTION -eq 5 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Status Apache?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v apache2)" ]; then
-                        systemctl status apache2
-                      else
-                        print_r "Apache is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Configuration Apache
-                  if [ $SP_ACTION -eq 6 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Configuration Apache?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v apache2)" ]; then
-                        while true; do
-                          print_y ""
-                          print_g "1) nano editor"
-                          print_g "2) vi editor"
-                          print_g "3) vim editor"
-                          print_g "4) Back to Menu"
-                          validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-                          CA_ACTION=$INPUT
-                          
-                            # nano editor
-                          if [ $CA_ACTION -eq 1 ]; then
-                          nano /www/server/apache/conf/httpd.conf
-                          sleep 2s
-                          clear
-                          fi
-
-                            # vi editor
-                          if [ $CA_ACTION -eq 2 ]; then
-                          vi /www/server/apache/conf/httpd.conf
-                          sleep 2s
-                          clear
-                          fi
-
-                            # vim editor
-                          if [ $CA_ACTION -eq 3 ]; then
-                          vim /www/server/apache/conf/httpd.conf
-                          sleep 2s
-                          clear
-                          fi
-                          if [ $CA_ACTION -eq 4 ]; then
-                          vim /www/server/apache/conf/httpd.conf
-                          sleep 5s
-                          clear
-                          fi
-                        done
-                      else
-                        print_r "Apache is not installed"
-                      fi
-                    fi
-                  fi
-
-                    # Open Directory Apache
-                  if [ $SP_ACTION -eq 7 ]; then
-                    clear
-                  validate_yn_input "$(print_y 'Are you sure you want to Open Directory Apache?(y/n) :')"
-                    if [ $INPUT = "y" ]; then
-                      if [ -x "$(command -v apache2)" ]; then
-                        cd /www/server/httpd ; ls
-                      else
-                        print_r "Apache is not installed"
-                      fi
-                    fi
-                  fi
-                  if [ $SP_ACTION -eq 8 ]; then
-                    clear
-                    break
-                  fi
-                done
-              fi
-            fi
-            if [ $WS_ACTION -eq 3 ]; then
-              clear
-              break
-            fi
-          done
+        pause_screen
+        ;;
+      7)
+        confirm_or_return "Are you sure you want to configure MySQL? (y/n):" || continue
+        if command_exists mysql; then
+          editor_menu /etc/my.cnf
+        else
+          print_r "Mysql is not installed."
+          pause_screen
         fi
-      fi
+        ;;
+      8)
+        confirm_or_return "Are you sure you want to open MySQL directory? (y/n):" || continue
+        if command_exists mysql; then cd /www/server/mysql && ls; else print_r "Mysql is not installed."; fi
+        pause_screen
+        ;;
+      9)
+        confirm_or_return "Are you sure you want to open phpMyAdmin directory? (y/n):" || continue
+        if command_exists mysql; then cd /www/server/phpmyadmin && ls; else print_r "Mysql is not installed."; fi
+        pause_screen
+        ;;
+      10)
+        confirm_or_return "Are you sure you want to open Data Storage directory? (y/n):" || continue
+        if command_exists mysql; then cd /www/server/data && ls; else print_r "Mysql is not installed."; fi
+        pause_screen
+        ;;
+      11)
+        break
+        ;;
+    esac
+  done
+}
 
-        # Setup Mysql
-      if [ $AP_ACTION -eq 5 ]; then
-        clear
-        echo -e "\033[0;32m${Mysql}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup Mysql?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Start Mysql"
-            print_g "2) Stop Mysql"
-            print_g "3) Restart Mysql"
-            print_g "4) Reload Mysql"
-            print_g "5) Status Mysql"
-            print_g "6) Change Password MySQL"
-            print_g "7) Configuration Mysql"
-            print_g "8) Open Directory Mysql"
-            print_g "9) Open Directory phpmyadmin"
-            print_g "10) Open Directory Data Storage"   
-            print_g "11) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-11) : ')" 1 11
-            SM_ACTION=$INPUT
-            
-              # Start Mysql
-            if [ $SM_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Start Mysql?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  systemctl start mysql
-                  print_g "Mysql Successfully Started."
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
+aa_ftp_menu() {
+  aa_panel_service_menu pure-ftpd FTP /www/server/pure-ftpd/etc/pure-ftpd /www/server/pure-ftpd directory
+}
 
-              # Stop Mysql
-            if [ $SM_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Stop Mysql?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  systemctl stop mysql
-                  print_g "Mysql Successfully Stoped."
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
+aa_redis_menu() {
+  aa_panel_service_menu redis Redis /www/server/redis/redis.conf /www/server/redis directory
+}
 
-              # Restart Mysql
-            if [ $SM_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Restart Mysql?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  systemctl restart mysql
-                  print_g "Mysql Successfully Restarted."
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
+aa_memcached_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${Memcached}\033[0m"
+    print_g "1) Start Memcached"
+    print_g "2) Stop Memcached"
+    print_g "3) Restart Memcached"
+    print_g "4) Reload Memcached"
+    print_g "5) Status Memcached"
+    print_g "6) Open Directory Memcached"
+    print_g "7) Back to Menu"
+    validate_menu_input "Enter your choice (1-7): " 1 7
 
-              # Reload Mysql
-            if [ $SM_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Reload Mysql?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  systemctl reload mysql
-                  print_g "Mysql Successfully Reloaded."
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
-
-              # Status Mysql
-            if [ $SM_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Status Mysql?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  systemctl status mysql
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
-
-              # Change Password MySQL
-            if [ $SM_ACTION -eq 6 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Change Password MySQL?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  read -rp "Enter Password : " Pass
-                  cd /www/server/panel ; python3 tools.py root $Pass
-                  print_b "Password Changed To -> "$Pass""
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
-
-              # Configuration Mysql
-            if [ $SM_ACTION -eq 7 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Configuration Mysql?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  while true; do
-                    print_y ""
-                    print_g "1) nano editor"
-                    print_g "2) vi editor"
-                    print_g "3) vim editor"
-                    print_g "4) Back to Menu"
-                    validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-                    CA_ACTION=$INPUT
-                    
-                      # nano editor
-                    if [ $CA_ACTION -eq 1 ]; then
-                    nano /etc/my.cnf
-                    sleep 2s
-                    clear
-                    fi
-
-                      # vi editor
-                    if [ $CA_ACTION -eq 2 ]; then
-                    vi /etc/my.cnf
-                    sleep 2s
-                    clear
-                    fi
-
-                      # vim editor
-                    if [ $CA_ACTION -eq 3 ]; then
-                    vim /etc/my.cnf
-                    sleep 2s
-                    clear
-                    fi
-                    if [ $CA_ACTION -eq 4 ]; then
-                    vim /etc/my.cnf
-                    sleep 2s
-                    clear
-                    fi
-                  done
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
-
-              # Open Directory Mysql
-            if [ $SM_ACTION -eq 8 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Open Directory Mysql?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  cd /www/server/mysql ; ls
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
-
-              # Open Directory phpmyadmin
-            if [ $SM_ACTION -eq 9 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Open Directory phpmyadmin?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  cd /www/server/phpmyadmin ; ls
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
-
-              # Open Directory Data Storage
-            if [ $SM_ACTION -eq 10 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Open Directory Data Storage?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -x "$(command -v mysql)" ]; then
-                  cd /www/server/data ; ls
-                else
-                  print_r "Mysql is not installed"
-                fi
-              fi
-            fi
-            if [ $SM_ACTION -eq 11 ]; then
-              clear
-              break
-            fi
-          done
+    case "$INPUT" in
+      1|2|3|4|5)
+        local action
+        case "$INPUT" in
+          1) action="start" ;;
+          2) action="stop" ;;
+          3) action="restart" ;;
+          4) action="reload" ;;
+          5) action="status" ;;
+        esac
+        confirm_or_return "Are you sure you want to ${action} Memcached? (y/n):" || continue
+        if [[ -d /usr/local/memcached ]]; then
+          if [[ "$action" == "status" ]]; then
+            systemctl status memcached
+          else
+            service_action memcached "$action"
+            print_g "Memcached ${action}ed successfully."
+          fi
+        else
+          print_r "Memcached is not installed."
         fi
-      fi
-
-        # Setup FTP
-      if [ $AP_ACTION -eq 6 ]; then
-        clear
-        echo -e "\033[0;32m${FTP}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup FTP?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Start FTP"
-            print_g "2) Stop FTP"
-            print_g "3) Restart FTP"
-            print_g "4) Reload FTP"
-            print_g "5) Status FTP"
-            print_g "6) Configuration FTP"
-            print_g "7) Open Directory FTP"
-            print_g "8) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-8) : ')" 1 8
-            SF_ACTION=$INPUT
-            
-              # Start FTP
-            if [ $SF_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Start FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/pure-ftpd ]; then
-                  systemctl start pure-ftpd
-                  print_g "FTP Successfully Started."
-                else
-                  print_r "FTP is not installed"
-                fi
-              fi
-            fi
-
-              # Stop FTP
-            if [ $SF_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Stop FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/pure-ftpd ]; then
-                  systemctl stop pure-ftpd
-                  print_g "FTP Successfully Stoped."
-                else
-                  print_r "FTP is not installed"
-                fi
-              fi
-            fi
-
-              # Restart FTP
-            if [ $SF_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Restart FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/pure-ftpd ]; then
-                  systemctl restart pure-ftpd
-                  print_g "FTP Successfully Restarted."
-                else
-                  print_r "FTP is not installed"
-                fi
-              fi
-            fi
-
-              # Reload FTP
-            if [ $SF_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Reload FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/pure-ftpd ]; then
-                  systemctl reload pure-ftpd
-                  print_g "FTP Successfully Reloaded."
-                else
-                  print_r "FTP is not installed"
-                fi
-              fi
-            fi
-
-              # Status FTP
-            if [ $SF_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Status FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/pure-ftpd ]; then
-                  systemctl status pure-ftpd
-                else
-                  print_r "FTP is not installed"
-                fi
-              fi
-            fi
-
-              # Configuration FTP
-            if [ $SF_ACTION -eq 6 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Configuration FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/pure-ftpd ]; then
-                  while true; do
-                    print_y ""
-                    print_g "1) nano editor"
-                    print_g "2) vi editor"
-                    print_g "3) vim editor"
-                    print_g "4) Back to Menu"
-                    validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-                    CA_ACTION=$INPUT
-                    
-                      # nano editor
-                    if [ $CA_ACTION -eq 1 ]; then
-                    nano /www/server/pure-ftpd/etc/pure-ftpd
-                    sleep 2s
-                    clear
-                    fi
-
-                      # vi editor
-                    if [ $CA_ACTION -eq 2 ]; then
-                    vi /www/server/pure-ftpd/etc/pure-ftpd
-                    sleep 2s
-                    clear
-                    fi
-
-                      # vim editor
-                    if [ $CA_ACTION -eq 3 ]; then
-                    vim /www/server/pure-ftpd/etc/pure-ftpd
-                    sleep 2s
-                    clear
-                    fi
-                    if [ $CA_ACTION -eq 4 ]; then
-                    vim /www/server/pure-ftpd/etc/pure-ftpd
-                    sleep 2s
-                    clear
-                    fi
-                  done
-                else
-                  print_r "FTP is not installed"
-                fi
-              fi
-            fi
-
-              # Open Directory FTP
-            if [ $SF_ACTION -eq 7 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Open Directory FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/pure-ftpd ]; then
-                  cd /www/server/pure-ftpd ; ls
-                else
-                  print_r "FTP is not installed"
-                fi
-              fi
-            fi
-            if [ $SF_ACTION -eq 8 ]; then
-              clear
-              break
-            fi
-          done
+        pause_screen
+        ;;
+      6)
+        confirm_or_return "Are you sure you want to open Memcached directory? (y/n):" || continue
+        if [[ -d /usr/local/memcached ]]; then
+          cd /usr/local/memcached && ls
+        else
+          print_r "Memcached is not installed."
         fi
-      fi
+        pause_screen
+        ;;
+      7)
+        break
+        ;;
+    esac
+  done
+}
 
-        # Setup Redis
-      if [ $AP_ACTION -eq 7 ]; then
-        clear
-        echo -e "\033[0;32m${Redis}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup Redis?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Start Redis"
-            print_g "2) Stop Redis"
-            print_g "3) Restart Redis"
-            print_g "5) Status Redis"
-            print_g "6) Configuration Redis"
-            print_g "7) Open Directory Redis"
-            print_g "8) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-8) : ')" 1 8
-            SR_ACTION=$INPUT
-            
-              # Start Redis
-            if [ $SR_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Start Redis?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/redis ]; then
-                  systemctl start redis
-                  print_g "Redis Successfully Started."
-                else
-                  print_r "Redis is not installed"
-                fi
-              fi
-            fi
+aa_panel_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${aaPanel}\033[0m"
+    print_y "What do you want to do?"
+    print_g "1) Install aaPanel"
+    print_g "2) Server Tools [4]"
+    print_g "3) Setup Management [10]"
+    print_g "4) Setup WebServer [2]"
+    print_g "5) Setup Mysql [10]"
+    print_g "6) Setup FTP [7]"
+    print_g "7) Setup Redis [7]"
+    print_g "8) Setup Memcached [6]"
+    print_g "9) Back to Menu"
+    validate_menu_input "Enter your choice (1-9): " 1 9
 
-              # Stop Redis
-            if [ $SR_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Stop Redis?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/redis ]; then
-                  systemctl stop redis
-                  print_g "Redis Successfully Stoped."
-                else
-                  print_r "Redis is not installed"
-                fi
-              fi
-            fi
+    case "$INPUT" in
+      1) clear_screen; echo -e "\033[0;32m${InstallaaPanel}\033[0m"; install_aapanel ;;
+      2) clear_screen; server_tools_menu ;;
+      3) clear_screen; aa_management_menu ;;
+      4) clear_screen; aa_webserver_menu ;;
+      5) clear_screen; aa_mysql_menu ;;
+      6) clear_screen; aa_ftp_menu ;;
+      7) clear_screen; aa_redis_menu ;;
+      8) clear_screen; aa_memcached_menu ;;
+      9) clear_screen; break ;;
+    esac
+  done
+}
 
-              # Restart Redis
-            if [ $SR_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Restart FTP?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/redis ]; then
-                  systemctl restart redis
-                  print_g "Redis Successfully Restarted."
-                else
-                  print_r "Redis is not installed"
-                fi
-              fi
-            fi
+# -----------------------------
+# Main Menu
+# -----------------------------
+main_menu() {
+  while true; do
+    clear_screen
+    echo -e "\033[0;32m${message}\033[0m"
+    echo -e "\033[34mInformation Server\033[0m"
+    information
+    echo
+    print_y "Which control panel do you want to manage or install?"
+    print_g "1) cPanel"
+    print_g "2) Plesk"
+    print_g "3) aaPanel"
+    print_g "4) Exit"
+    validate_menu_input "Enter your choice (1-4): " 1 4
 
-              # Reload Redis
-            if [ $SR_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Reload Redis?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/redis ]; then
-                  systemctl reload redis
-                  print_g "Redis Successfully Reloaded."
-                else
-                  print_r "Redis is not installed"
-                fi
-              fi
-            fi
+    case "$INPUT" in
+      1) cpanel_menu ;;
+      2) plesk_menu ;;
+      3) aa_panel_menu ;;
+      4) clear_screen; exit 0 ;;
+    esac
+  done
+}
 
-              # Status Redis
-            if [ $SR_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Status Redis?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/redis ]; then
-                  systemctl status redis
-                else
-                  print_r "Redis is not installed"
-                fi
-              fi
-            fi
+# -----------------------------
+# Bootstrap
+# -----------------------------
+main() {
+  require_root
+  load_os_info
+  update_system_packages
+  collect_server_info
+  main_menu
+}
 
-              # Configuration Redis
-            if [ $SR_ACTION -eq 6 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Configuration Redis?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/redis ]; then
-                  while true; do
-                    print_y ""
-                    print_g "1) nano editor"
-                    print_g "2) vi editor"
-                    print_g "3) vim editor"
-                    print_g "4) Back to Menu"
-                    validate_menu_input "$(print_y 'Enter your choice (1-4) : ')" 1 4
-                    CA_ACTION=$INPUT
-                    
-                      # nano editor
-                    if [ $CA_ACTION -eq 1 ]; then
-                    nano /www/server/redis/redis.conf
-                    sleep 2s
-                    clear
-                    fi
-
-                      # vi editor
-                    if [ $CA_ACTION -eq 2 ]; then
-                    vi /www/server/redis/redis.conf
-                    sleep 2s
-                    clear
-                    fi
-
-                      # vim editor
-                    if [ $CA_ACTION -eq 3 ]; then
-                    vim /www/server/redis/redis.conf
-                    sleep 2s
-                    clear
-                    fi
-                    if [ $CA_ACTION -eq 4 ]; then
-                    vim /www/server/redis/redis.conf
-                    sleep 2s
-                    clear
-                    fi
-                  done
-                else
-                  print_r "Redis is not installed"
-                fi
-              fi
-            fi
-
-              # Open Directory Redis
-            if [ $SR_ACTION -eq 7 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Open Directory Redis?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /www/server/redis ]; then
-                  cd /www/server/redis ; ls
-                else
-                  print_r "Redis is not installed"
-                fi
-              fi
-            fi
-            if [ $SR_ACTION -eq 8 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
-
-        # Setup Memcached
-      if [ $AP_ACTION -eq 8 ]; then
-        clear
-        echo -e "\033[0;32m${Memcached}\033[0m"
-      validate_yn_input "$(print_y 'Are you sure you want to Setup Memcached?(y/n) :')"
-        if [ $INPUT = "y" ]; then
-          while true; do
-            print_g "1) Start Memcached"
-            print_g "2) Stop Memcached"
-            print_g "3) Restart Memcached"
-            print_g "5) Status Memcached"
-            print_g "6) Open Directory Memcached"
-            print_g "7) Back to Menu"
-            validate_menu_input "$(print_y 'Enter your choice (1-8) : ')" 1 8
-            SMC_ACTION=$INPUT
-            
-              # Start Memcached
-            if [ $SMC_ACTION -eq 1 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Start Memcached?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /usr/local/memcached ]; then
-                  systemctl start memcached
-                  print_g "Memcached Successfully Started."
-                else
-                  print_r "Memcached is not installed"
-                fi
-              fi
-            fi
-
-              # Stop Memcached
-            if [ $SMC_ACTION -eq 2 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Stop Memcached?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /usr/local/memcached ]; then
-                  systemctl stop memcached
-                  print_g "Memcached Successfully Stoped."
-                else
-                  print_r "Memcached is not installed"
-                fi
-              fi
-            fi
-
-              # Restart Memcached
-            if [ $SMC_ACTION -eq 3 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Restart Memcached?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /usr/local/memcached ]; then
-                  systemctl restart memcached
-                  print_g "Memcached Successfully Restarted."
-                else
-                  print_r "Memcached is not installed"
-                fi
-              fi
-            fi
-
-              # Reload Memcached
-            if [ $SMC_ACTION -eq 4 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Reload Memcached?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /usr/local/memcached ]; then
-                  systemctl reload memcached
-                  print_g "Memcached Successfully Reloaded."
-                else
-                  print_r "Memcached is not installed"
-                fi
-              fi
-            fi
-
-              # Status Memcached
-            if [ $SMC_ACTION -eq 5 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Status Memcached?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /usr/local/memcached ]; then
-                  systemctl status memcached
-                else
-                  print_r "Memcached is not installed"
-                fi
-              fi
-            fi
-
-              # Open Directory Memcached
-            if [ $SMC_ACTION -eq 7 ]; then
-              clear
-            validate_yn_input "$(print_y 'Are you sure you want to Open Directory Memcached?(y/n) :')"
-              if [ $INPUT = "y" ]; then
-                if [ -d /usr/local/memcached ]; then
-                  cd /usr/local/memcached ; ls
-                else
-                  print_r "Memcached is not installed"
-                fi
-              fi
-            fi
-            if [ $SMC_ACTION -eq 8 ]; then
-              clear
-              break
-            fi
-          done
-        fi
-      fi
-    done
-  fi
-done
+main "$@"
