@@ -1,220 +1,249 @@
 # AutoInstaller
 
-**AutoInstaller** is a versatile script for automatically installing and configuring popular web hosting control panels (cPanel, Plesk, aaPanel) and various server components. This script is written in Bash.
+**AutoInstaller** is a Bash-based automation script designed to install and manage popular web hosting control panels and common server services through a simple interactive menu.
+
+It supports installation, configuration, and management of:
+
+* cPanel
+* Plesk
+* aaPanel
+* Server services (CSF, FTP, Web Server, Database, etc.)
 
 ## Table of Contents
-- [Installation](#installation)
-- [Supported Operating Systems](#supported-operating-systems)
-- [Features](#features)
-  - [cPanel](#cpanel)
-  - [Plesk](#plesk)
-  - [aaPanel](#aapanel)
-- [Support & Contributions](#support--contributions)
-- [Donation Links](#donation-links)
+
+* [Installation](#installation)
+* [Supported Operating Systems](#supported-operating-systems)
+* [Features](#features)
+
+  * [cPanel](#cpanel)
+  * [Plesk](#plesk)
+  * [aaPanel](#aapanel)
+* [Improvements](#improvements)
+* [Support & Contributions](#support--contributions)
+* [Donation Links](#donation-links)
 
 ## Installation
 
-To get started, follow these steps:
-
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/DevURANIUM/AutoInstaller/
    ```
 
 2. Navigate into the directory:
+
    ```bash
    cd AutoInstaller
    ```
 
 3. Make the script executable:
+
    ```bash
    chmod +x autoinstaller.sh
    ```
 
-4. Run the script:
+4. Run the script (as root):
+
    ```bash
    ./autoinstaller.sh
    ```
 
 ## Supported Operating Systems
 
-| Operating System | Description |
-| ---------------- | ----------- |
-| CentOS 7+        | Recommended for cPanel installation |
-| Debian 10+       | Recommended for Plesk installation |
-| Ubuntu 20+       | Recommended for aaPanel and cPanel installation |
+| Operating System           | Description                           |
+| -------------------------- | ------------------------------------- |
+| CentOS / AlmaLinux / Rocky | Recommended for cPanel and CloudLinux |
+| Debian 10+                 | Recommended for Plesk                 |
+| Ubuntu 20+                 | Recommended for aaPanel               |
 
 ## Features
 
 ### cPanel
-- **Installation**
-  - Install cPanel
 
-- **Server Tools**
-  - Change Nameserver
-  - Change Hostname
-  - Change SSH Port
-  - Change Root Password
+* **Installation**
 
-- **CSF Setup**
-  - Configure CSF
-  - Configure CSF Blocklists
-  - Unblock Telegram IPs
-  - Uninstall CSF
+  * Install cPanel (official installer)
 
-- **Plugins**
-  - Install LiteSpeed
-  - Install ImunifyAV
-  - Install SSL
-  - Install WHMReseller
-  - Install WP Toolkit
-  - Install PostgreSQL
-  - Install Softaculous
-  - Install SitePad
+* **Server Tools**
 
-- **CloudLinux Setup**
-  - Install CloudLinux
-  - Install CageFS
-  - Install alt-php
-  - Install ea-php
-  - Install mod-lsapi
-  - Install Python
-  - Install Ruby
-  - Install NodeJS
-  - Install MySQL Governor (not recommended)
+  * Change Nameserver
+  * Change Hostname
+  * Change SSH Port (with safer handling)
+  * Change Root Password
 
-- **FTP Server Setup**
-  - Install Pure-FTPd (recommended)
-  - Install ProFTP
-  - Disable FTP Services
+* **CSF Setup**
 
-- **Advanced Tools**
-  - Restore Backup
-  - Clear RAM Cache
-  - Delete all error_log
-  - Clear /tmp
+  * Install CSF
+  * Configure CSF
+  * Configure CSF Blocklists
+  * Unblock Telegram IPs
+  * Uninstall CSF
+
+* **Plugins**
+
+  * Install LiteSpeed
+  * Install ImunifyAV
+  * Install SSL (AutoSSL / Let's Encrypt)
+  * Install WHMReseller (CentOS only)
+  * Install WP Toolkit
+  * Install PostgreSQL (CentOS only)
+  * Install Softaculous
+  * Install SitePad
+
+* **CloudLinux Setup**
+
+  * Install CloudLinux
+  * Install CageFS
+  * Install alt-php
+  * Install ea-php (multiple versions)
+  * Install mod-lsapi
+  * Install Python
+  * Install Ruby
+  * Install NodeJS
+  * Install MySQL Governor (not recommended)
+
+* **FTP Server Setup**
+
+  * Setup Pure-FTPd (recommended)
+  * Setup ProFTPd
+  * Disable FTP Services
+
+* **Advanced Tools**
+
+  * Restore Backup
+  * Clear RAM Cache
+  * Delete all error_log files
+  * Clear /tmp
 
 ### Plesk
-- **Installation**
-  - Install Plesk
 
-- **Server Tools**
-  - Change Nameserver
-  - Change Hostname
-  - Change SSH Port
-  - Change Root Password
+* **Installation**
 
-- **CSF Setup**
-  - Configure CSF
-  - Configure CSF Blocklists
-  - Unblock Telegram IPs
-  - Uninstall CSF
+  * Install Plesk (one-click installer)
 
-- **Plugins**
-  - Install LiteSpeed
-  - Install ImunifyAV
-  - Install Softaculous
-  - Install SitePad
+* **Server Tools**
 
-- **Advanced Tools**
-  - Clear RAM Cache
-  - Delete all error_log
-  - Clear /tmp
+  * Change Nameserver
+  * Change Hostname
+  * Change SSH Port
+  * Change Root Password
+
+* **CSF Setup**
+
+  * Install CSF
+  * Configure CSF
+  * Configure CSF Blocklists
+  * Unblock Telegram IPs
+  * Uninstall CSF
+
+* **Plugins**
+
+  * Install LiteSpeed
+  * Install ImunifyAV
+  * Install Softaculous
+  * Install SitePad
+
+* **Advanced Tools**
+
+  * Clear RAM Cache
+  * Delete all error_log files
+  * Clear /tmp
 
 ### aaPanel
-- **Installation**
-  - Install aaPanel
 
-- **Server Tools**
-  - Change Nameserver
-  - Change Hostname
-  - Change SSH Port
-  - Change Root Password
+* **Installation**
 
-- **Management**
-  - Start aaPanel
-  - Stop aaPanel
-  - Restart aaPanel
-  - Uninstall aaPanel
-  - Change aaPanel Password
-  - View Current Port
-  - Change aaPanel Port
-  - Turn off SSL for aaPanel
-  - View Error Logs for aaPanel
-  - View Site Error Logs
+  * Install aaPanel (CentOS / Ubuntu / Debian)
 
-- **WebServer Setup**
-  - **Nginx**
-    - Start Nginx
-    - Stop Nginx
-    - Restart Nginx
-    - Reload Nginx
-    - Check Nginx Status
-    - Configure Nginx
-    - Open Nginx Directory
+* **Server Tools**
 
-  - **Apache**
-    - Start Apache
-    - Stop Apache
-    - Restart Apache
-    - Reload Apache
-    - Check Apache Status
-    - Configure Apache
-    - Open Apache Directory
+  * Change Nameserver
+  * Change Hostname
+  * Change SSH Port
+  * Change Root Password
 
-- **MySQL Setup**
-  - Start MySQL
-  - Stop MySQL
-  - Restart MySQL
-  - Reload MySQL
-  - Check MySQL Status
-  - Change MySQL Password
-  - Configure MySQL
-  - Open MySQL Directory
-  - Open phpMyAdmin Directory
-  - Open Data Storage Directory
+* **Management**
 
-- **FTP Setup**
-  - Start FTP
-  - Stop FTP
-  - Restart FTP
-  - Reload FTP
-  - Check FTP Status
-  - Configure FTP
-  - Open FTP Directory
+  * Start aaPanel
+  * Stop aaPanel
+  * Restart aaPanel
+  * Uninstall aaPanel
+  * Change aaPanel Password
+  * View Current Port
+  * Change aaPanel Port
+  * Turn off SSL for aaPanel
+  * View Error Logs (panel and sites)
 
-- **Redis Setup**
-  - Start Redis
-  - Stop Redis
-  - Restart Redis
-  - Check Redis Status
-  - Configure Redis
-  - Open Redis Directory
+* **WebServer Setup**
 
-- **Memcached Setup**
-  - Start Memcached
-  - Stop Memcached
-  - Restart Memcached
-  - Check Memcached Status
-  - Open Memcached Directory
+  * Nginx
+
+    * Start / Stop / Restart / Reload
+    * Status
+    * Configuration (nano / vi / vim)
+    * Open Directory
+  * Apache
+
+    * Start / Stop / Restart / Reload
+    * Status
+    * Configuration (nano / vi / vim)
+    * Open Directory
+
+* **MySQL Setup**
+
+  * Start / Stop / Restart / Reload
+  * Status
+  * Change Password
+  * Configuration
+  * Open Directories (mysql / phpmyadmin / data)
+
+* **FTP Setup**
+
+  * Start / Stop / Restart / Reload
+  * Status
+  * Configuration
+  * Open Directory
+
+* **Redis Setup**
+
+  * Start / Stop / Restart
+  * Status
+  * Configuration
+  * Open Directory
+
+* **Memcached Setup**
+
+  * Start / Stop / Restart
+  * Status
+  * Open Directory
+
+## Improvements
+
+* Reduced duplicated code for better maintainability
+* Improved menu handling and input validation
+* Fixed logical issues in some sections (plugins, ports, menus)
+* Safer handling of system configuration files
+* More consistent behavior across different OS types
 
 ## Support & Contributions
 
-If you encounter any issues or have suggestions for improvement, please reach out via:
+If you encounter any issues or have suggestions for improvement, please use:
 
-- [GitHub Issues](https://github.com/DevURANIUM/AutoInstaller/issues)
+* [https://github.com/DevURANIUM/AutoInstaller/issues](https://github.com/DevURANIUM/AutoInstaller/issues)
+
+Pull requests are welcome.
 
 ## Donation Links
 
 Support the project through donations:
 
-- **BTC**: `bc1qcclcp574hnznm0nmdzzf0ta7366svjskttqks3`
-- **LTC**: `ltc1qcrkelw38gjrmg0ptjy2nshqej622kp76het7q0`
-- **XRP**: `rPoK5SBChFPqEiQv1W97LW6FKoJZLipDVQ`
-- **XLM**: `GDMUQREEZNBSTQOT5BV7MYEMXJFV3CYRZXUVOYCTIUZTHUWPHLVASFVD`
-- **TON**: `UQAJH2N0pqpvC9YN841w5NH1dCN9Lakwkpjvoy7vXf-vfqgv`
-- **TRON**: `TXJqhhwvkrTdnf5HReZf55hEzZuxjto3R4`
-- **USDT(BEP20)**: `0x1591036c4bD05b046532B65Df939fcd7824E18c7`
+* **BTC**: `bc1qcclcp574hnznm0nmdzzf0ta7366svjskttqks3`
+* **LTC**: `ltc1qcrkelw38gjrmg0ptjy2nshqej622kp76het7q0`
+* **XRP**: `rPoK5SBChFPqEiQv1W97LW6FKoJZLipDVQ`
+* **XLM**: `GDMUQREEZNBSTQOT5BV7MYEMXJFV3CYRZXUVOYCTIUZTHUWPHLVASFVD`
+* **TON**: `UQAJH2N0pqpvC9YN841w5NH1dCN9Lakwkpjvoy7vXf-vfqgv`
+* **TRON**: `TXJqhhwvkrTdnf5HReZf55hEzZuxjto3R4`
+* **USDT(BEP20)**: `0x1591036c4bD05b046532B65Df939fcd7824E18c7`
 
 ---
 
