@@ -229,7 +229,7 @@ It supports installation, configuration, and management of:
 
 If you encounter any issues or have suggestions for improvement, please use:
 
-* [https://github.com/DevURANIUM/AutoInstaller/issues](https://github.com/DevURANIUM/AutoInstaller/issues)
+* [Github issues](https://github.com/DevURANIUM/AutoInstaller/issues)
 
 Pull requests are welcome.
 
