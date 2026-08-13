@@ -5,10 +5,15 @@
 # Email: info@heydari.org
 # Refactor goal: keep features, improve structure, safety, maintainability
 
-set -u
+set -uo pipefail
 
 readonly APP_NAME="Auto Installer"
-readonly VERSION="2.0.0"
+readonly VERSION="3.0.0"
+readonly LOG_FILE="${AUTOINSTALLER_LOG:-/var/log/autoinstaller.log}"
+
+AUTO_UPDATE=0
+CHECK_ONLY=0
+NO_COLOR="${NO_COLOR:-}"
 
 # -----------------------------
 # Colors
@@ -19,10 +24,18 @@ YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-print_b() { echo -e "${BLUE}$*${NC}"; }
-print_r() { echo -e "${RED}$*${NC}"; }
-print_y() { echo -e "${YELLOW}$*${NC}"; }
-print_g() { echo -e "${GREEN}$*${NC}"; }
+if [[ -n "$NO_COLOR" || ! -t 1 ]]; then
+  BLUE=''
+  RED=''
+  YELLOW=''
+  GREEN=''
+  NC=''
+fi
+
+print_b() { printf '%b\n' "${BLUE}$*${NC}"; }
+print_r() { printf '%b\n' "${RED}$*${NC}" >&2; }
+print_y() { printf '%b\n' "${YELLOW}$*${NC}"; }
+print_g() { printf '%b\n' "${GREEN}$*${NC}"; }
 
 # -----------------------------
 # Banners
@@ -196,6 +209,17 @@ APACHE_SERVICE="apache2"
 MYSQL_SERVICE="mysql"
 IP_ADDRESS=""
 INPUT=""
+HOSTNAME_VALUE="unknown"
+VIRTUALIZATION="unknown"
+OPERATING_SYSTEM="unknown"
+KERNEL="unknown"
+ARCHITECTURE="unknown"
+VENDOR="unknown"
+MODEL="unknown"
+CPU_NAME="unknown"
+CPU_CORES="unknown"
+MEM_TOTAL="unknown"
+HDD_TOTAL="unknown"
 
 # -----------------------------
 # Helpers
@@ -217,6 +241,86 @@ clear_screen() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+log_message() {
+  local level="$1"
+  shift
+  printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+die() {
+  print_r "Error: $*"
+  log_message ERROR "$*"
+  return 1
+}
+
+on_error() {
+  local status="$1" line="$2"
+  log_message ERROR "Command failed with status $status at line $line"
+}
+
+trap 'on_error "$?" "$LINENO"' ERR
+trap 'printf "\n"; print_y "Operation interrupted."; exit 130' INT TERM
+
+run_command() {
+  local description="$1"
+  shift
+  print_y "$description..."
+  log_message INFO "$description"
+  if "$@"; then
+    print_g "$description completed."
+    return 0
+  fi
+  die "$description failed. See $LOG_FILE for details."
+}
+
+download_file() {
+  local url="$1" destination="$2"
+  [[ "$url" == https://* ]] || { die "Refusing insecure download URL: $url"; return 1; }
+
+  if command_exists curl; then
+    curl --fail --location --show-error --silent --retry 3 --connect-timeout 20 \
+      --output "$destination" "$url"
+  elif command_exists wget; then
+    wget --https-only --tries=3 --timeout=30 --output-document="$destination" "$url"
+  else
+    die "curl or wget is required to download files."
+  fi
+}
+
+run_downloaded_script() {
+  local url="$1"
+  shift
+  local temporary_script
+  temporary_script=$(mktemp "${TMPDIR:-/tmp}/autoinstaller.XXXXXX") || return 1
+  if download_file "$url" "$temporary_script"; then
+    chmod 700 "$temporary_script"
+    bash "$temporary_script" "$@"
+    local status=$?
+    rm -f "$temporary_script"
+    return "$status"
+  fi
+  rm -f "$temporary_script"
+  return 1
+}
+
+validate_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
+}
+
+validate_hostname() {
+  [[ ${#1} -le 253 && "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ && "$1" != *..* ]]
+}
+
+validate_ip_address() {
+  local ip="$1" part
+  local -a parts
+  IFS=. read -r -a parts <<< "$ip"
+  (( ${#parts[@]} == 4 )) || return 1
+  for part in "${parts[@]}"; do
+    [[ "$part" =~ ^[0-9]{1,3}$ ]] && (( 10#$part <= 255 )) || return 1
+  done
 }
 
 service_restart_any() {
@@ -315,6 +419,11 @@ load_os_info() {
 }
 
 update_system_packages() {
+  if (( AUTO_UPDATE == 0 )); then
+    print_y "Automatic system upgrade is disabled. Use --update to enable it."
+    return 0
+  fi
+
   case "$PKG_MANAGER" in
     yum)
       yum update -y
@@ -329,7 +438,7 @@ update_system_packages() {
       done
       ;;
     apt)
-      apt update -y
+      apt update
       apt upgrade -y
       apt autoremove -y
       for pkg in perl wget curl screen tar unzip; do
@@ -340,6 +449,31 @@ update_system_packages() {
       print_r "Unsupported package manager. Skipping package bootstrap."
       ;;
   esac
+}
+
+system_check() {
+  local failures=0 tool
+  print_b "$APP_NAME $VERSION - system check"
+  information
+  echo
+  print_y "Required tools:"
+  for tool in bash awk sed grep tar; do
+    if command_exists "$tool"; then
+      print_g "  [OK] $tool"
+    else
+      print_r "  [MISSING] $tool"
+      failures=$((failures + 1))
+    fi
+  done
+  if command_exists curl || command_exists wget; then
+    print_g "  [OK] downloader"
+  else
+    print_r "  [MISSING] curl/wget"
+    failures=$((failures + 1))
+  fi
+  print_y "Package manager: $PKG_MANAGER"
+  print_y "Log file: $LOG_FILE"
+  (( failures == 0 ))
 }
 
 collect_server_info() {
@@ -412,6 +546,12 @@ change_nameserver() {
   safe_read primary_ns "Enter Primary Nameserver: "
   safe_read secondary_ns "Enter Secondary Nameserver: "
 
+  if ! validate_ip_address "$primary_ns" || ! validate_ip_address "$secondary_ns"; then
+    print_r "Invalid IPv4 nameserver address."
+    pause_screen
+    return 1
+  fi
+
   if [[ -f /etc/resolv.conf ]]; then
     backup_file="/etc/resolv.conf.bak.$(date +%Y%m%d%H%M%S)"
     cp -f /etc/resolv.conf "$backup_file"
@@ -432,11 +572,11 @@ change_hostname() {
 
   local new_hostname
   safe_read new_hostname "Enter your Hostname: "
-  if [[ -n "$new_hostname" ]]; then
+  if validate_hostname "$new_hostname"; then
     hostnamectl set-hostname "$new_hostname"
     print_b "Hostname changed to -> $new_hostname"
   else
-    print_r "Hostname cannot be empty."
+    print_r "Invalid hostname. Use letters, numbers, dots and hyphens only."
   fi
   pause_screen
 }
@@ -447,7 +587,7 @@ change_ssh_port() {
   local new_port ssh_config backup_file
   safe_read new_port "Enter new SSH port: "
 
-  if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
+  if ! validate_port "$new_port"; then
     print_r "Invalid port number."
     pause_screen
     return 1
@@ -469,7 +609,20 @@ change_ssh_port() {
     echo "Port $new_port" >> "$ssh_config"
   fi
 
-  service_restart_any "$SSH_SERVICE"
+  if command_exists sshd && ! sshd -t; then
+    cp -f "$backup_file" "$ssh_config"
+    print_r "SSH configuration test failed; the original file was restored."
+    pause_screen
+    return 1
+  fi
+
+  service_restart_any "$SSH_SERVICE" || {
+    cp -f "$backup_file" "$ssh_config"
+    service_restart_any "$SSH_SERVICE" || true
+    print_r "SSH restart failed; the original configuration was restored."
+    pause_screen
+    return 1
+  }
   print_b "SSH Port changed to -> $new_port"
   print_g "Backup saved at: $backup_file"
   pause_screen
@@ -519,7 +672,7 @@ install_csf() {
   confirm_or_return "Are you sure you want to install CSF? (y/n):" || return 0
   cd /usr/src || return 1
   rm -f csf.tgz
-  wget https://download.configserver.com/csf.tgz
+  download_file https://download.configserver.com/csf.tgz csf.tgz || return 1
   tar -xzf csf.tgz
   cd csf || return 1
   sh install.sh
@@ -621,7 +774,7 @@ csf_menu() {
 install_litespeed_cpanel() {
   confirm_or_return "Are you sure you want to install LiteSpeed? (y/n):" || return 0
   cd /usr/src || return 1
-  wget http://www.litespeedtech.com/packages/cpanel/lsws_whm_plugin_install.sh
+  download_file https://www.litespeedtech.com/packages/cpanel/lsws_whm_plugin_install.sh lsws_whm_plugin_install.sh || return 1
   chmod 700 lsws_whm_plugin_install.sh
   ./lsws_whm_plugin_install.sh
   rm -f lsws_whm_plugin_install.sh
@@ -631,7 +784,7 @@ install_litespeed_cpanel() {
 
 install_imunifyav() {
   confirm_or_return "Are you sure you want to install ImunifyAV? (y/n):" || return 0
-  wget https://repo.imunify360.cloudlinux.com/defence360/imav-deploy.sh -O /root/imav-deploy.sh
+  download_file https://repo.imunify360.cloudlinux.com/defence360/imav-deploy.sh /root/imav-deploy.sh || return 1
   bash /root/imav-deploy.sh
   rm -f /root/imav-deploy.sh
   print_b "ImunifyAV installed successfully."
@@ -657,7 +810,7 @@ install_whmreseller() {
     esac
 
     cd /usr/local/cpanel/whostmgr/docroot/cgi || return 1
-    wget http://deasoft.com/install.cpp
+    download_file https://deasoft.com/install.cpp install.cpp || return 1
     g++ install.cpp -o install
     chmod 700 install
     ./install
@@ -670,7 +823,7 @@ install_whmreseller() {
 
 install_wp_toolkit_cpanel() {
   confirm_or_return "Are you sure you want to install WP Toolkit? (y/n):" || return 0
-  sh <(curl -fsSL https://wp-toolkit.plesk.com/cPanel/installer.sh || wget -qO- https://wp-toolkit.plesk.com/cPanel/installer.sh)
+  run_downloaded_script https://wp-toolkit.plesk.com/cPanel/installer.sh || return 1
   print_b "WP Toolkit installed successfully."
   pause_screen
 }
@@ -698,7 +851,7 @@ install_softaculous() {
   confirm_or_return "Are you sure ionCube is installed and active on your server? (y/n):" || return 0
 
   if php -m 2>/dev/null | grep -qi ionCube; then
-    wget -N http://files.softaculous.com/install.sh
+    download_file https://files.softaculous.com/install.sh install.sh || return 1
     chmod 755 install.sh
     ./install.sh
     print_b "Softaculous installed successfully."
@@ -714,7 +867,7 @@ install_sitepad() {
   if php -m 2>/dev/null | grep -qi ionCube; then
     cd /usr/local/src || return 1
     rm -f install.sh
-    wget -N https://files.sitepad.com/install.sh
+    download_file https://files.sitepad.com/install.sh install.sh || return 1
     chmod +x install.sh
     ./install.sh
     print_b "SitePad installed successfully."
@@ -760,7 +913,7 @@ install_cloudlinux() {
   confirm_or_return "Are you sure you want to install CloudLinux? (y/n):" || return 0
 
   if is_centos_family; then
-    wget https://repo.cloudlinux.com/cloudlinux/sources/cln/cldeploy -O cldeploy.sh
+    download_file https://repo.cloudlinux.com/cloudlinux/sources/cln/cldeploy cldeploy.sh || return 1
     print_g "Get a 30-day CloudLinux License: https://www.cloudlinux.com/trial"
     validate_yn_input "Do you use the free 30-day license? (y/n):"
     if is_yes "$INPUT"; then
@@ -1023,8 +1176,18 @@ restore_backup_cpanel() {
   cd "$directory" || { print_r "Cannot access $directory"; pause_screen; return 1; }
   safe_read backup_link "Enter backup link: "
   print_g "Downloading the backup file..."
-  wget "$backup_link"
-  safe_read backup_file_name "Enter backup file name: "
+  if [[ "$backup_link" != https://* ]]; then
+    print_r "Only HTTPS backup links are accepted."
+    pause_screen
+    return 1
+  fi
+  local suggested_name
+  suggested_name="${backup_link%%\?*}"
+  suggested_name="${suggested_name##*/}"
+  [[ -n "$suggested_name" ]] || suggested_name="cpanel-backup.tar.gz"
+  safe_read backup_file_name "Enter backup file name (default $suggested_name): "
+  [[ -n "$backup_file_name" ]] || backup_file_name="$suggested_name"
+  download_file "$backup_link" "$backup_file_name" || return 1
   print_g "Restoring the backup file..."
   /usr/local/cpanel/scripts/restorepkg "$backup_file_name"
   pause_screen
@@ -1125,8 +1288,8 @@ advanced_tools_menu_plesk() {
 install_cpanel() {
   confirm_or_return "Are you sure you want to install cPanel? (y/n):" || return 0
   cd /home || return 1
-  curl -o latest -L https://securedownloads.cpanel.net/latest
-  sh latest
+  download_file https://securedownloads.cpanel.net/latest latest || return 1
+  bash latest
 }
 
 cpanel_menu() {
@@ -1162,13 +1325,13 @@ cpanel_menu() {
 # -----------------------------
 install_plesk() {
   confirm_or_return "Are you sure you want to install Plesk? (y/n):" || return 0
-  sh <(curl -fsSL https://autoinstall.plesk.com/one-click-installer || wget -qO- https://autoinstall.plesk.com/one-click-installer)
+  run_downloaded_script https://autoinstall.plesk.com/one-click-installer || return 1
 }
 
 install_litespeed_plesk() {
   confirm_or_return "Are you sure you want to install LiteSpeed? (y/n):" || return 0
   cd /usr/src || return 1
-  wget http://www.litespeedtech.com/packages/plesk/litespeed-plesk.zip
+  download_file https://www.litespeedtech.com/packages/plesk/litespeed-plesk.zip litespeed-plesk.zip || return 1
   unzip -o litespeed-plesk.zip
   cd plib/resources || return 1
   chmod 700 pleskInstall.sh
@@ -1361,16 +1524,13 @@ install_aapanel() {
       yum) yum install -y wget ;;
       dnf) dnf install -y wget ;;
     esac
-    wget -O install.sh http://www.aapanel.com/script/install_6.0_en.sh
-    bash install.sh aapanel
+    run_downloaded_script https://www.aapanel.com/script/install_6.0_en.sh aapanel || return 1
     print_g "aaPanel installed successfully. Please login to panel."
   elif [[ "$OS_ID" == "ubuntu" ]]; then
-    wget -O install.sh http://www.aapanel.com/script/install-ubuntu_6.0_en.sh
-    bash install.sh aapanel
+    run_downloaded_script https://www.aapanel.com/script/install-ubuntu_6.0_en.sh aapanel || return 1
     print_g "aaPanel installed successfully. Please login to panel."
   elif [[ "$OS_ID" == "debian" ]]; then
-    wget -O install.sh http://www.aapanel.com/script/install-ubuntu_6.0_en.sh
-    bash install.sh aapanel
+    run_downloaded_script https://www.aapanel.com/script/install-ubuntu_6.0_en.sh aapanel || return 1
     print_g "aaPanel installed successfully. Please login to panel."
   else
     print_r "aaPanel installation is only supported on CentOS-like, Ubuntu, Debian."
@@ -1441,7 +1601,7 @@ aa_management_menu() {
         confirm_or_return "Are you sure you want to change aaPanel port? (y/n):" || continue
         local port
         safe_read port "Enter aaPanel Port: "
-        if [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )); then
+        if validate_port "$port"; then
           echo "$port" > /www/server/panel/data/port.pl
           service_action bt restart
           if command_exists firewall-cmd; then
@@ -1699,11 +1859,46 @@ main_menu() {
 # -----------------------------
 # Bootstrap
 # -----------------------------
+usage() {
+  cat <<EOF
+$APP_NAME $VERSION
+
+Usage: $0 [options]
+  --check          Run compatibility checks and exit
+  --update         Update system packages during startup
+  --skip-update    Do not update system packages (default)
+  --no-color       Disable colored output
+  --version        Show version and exit
+  -h, --help       Show this help
+EOF
+}
+
+parse_arguments() {
+  while (( $# > 0 )); do
+    case "$1" in
+      --check) CHECK_ONLY=1 ;;
+      --update) AUTO_UPDATE=1 ;;
+      --skip-update) AUTO_UPDATE=0 ;;
+      --no-color) BLUE=''; RED=''; YELLOW=''; GREEN=''; NC='' ;;
+      --version) printf '%s %s\n' "$APP_NAME" "$VERSION"; exit 0 ;;
+      -h|--help) usage; exit 0 ;;
+      *) print_r "Unknown option: $1"; usage; exit 2 ;;
+    esac
+    shift
+  done
+}
+
 main() {
+  parse_arguments "$@"
   require_root
   load_os_info
-  update_system_packages
   collect_server_info
+  log_message INFO "Starting $APP_NAME $VERSION on $OPERATING_SYSTEM"
+  if (( CHECK_ONLY == 1 )); then
+    system_check
+    exit $?
+  fi
+  update_system_packages
   main_menu
 }
 
